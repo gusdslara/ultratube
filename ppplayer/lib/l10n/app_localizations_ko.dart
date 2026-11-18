@@ -1,0 +1,1141 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Korean (`ko`).
+class AppLocalizationsKo extends AppLocalizations {
+  AppLocalizationsKo([String locale = 'ko']) : super(locale);
+
+  @override
+  String get appTitle => 'PPPlayer';
+
+  @override
+  String titleSubtitle(Object title, Object subtitle) {
+    return '$title, $subtitle';
+  }
+
+  @override
+  String get albums => '앨범';
+
+  @override
+  String get api => 'API';
+
+  @override
+  String get artists => '아티스트';
+
+  @override
+  String get artwork => '아트워크';
+
+  @override
+  String get appVersion => '앱 버전';
+
+  @override
+  String get artist => '아티스트';
+
+  @override
+  String get artistsYouFollow => '팔로우하는 아티스트';
+
+  @override
+  String get autoplay => '자동 재생';
+
+  @override
+  String get becauseYouListenedTo => '이전에 들었던 음악을 기반으로';
+
+  @override
+  String get browseAll => '모두 찾아보기';
+
+  @override
+  String get cancel => '취소';
+
+  @override
+  String get clearAppCache => '앱 캐시를 지우시겠습니까?';
+
+  @override
+  String get clearCache => '캐시 지우기';
+
+  @override
+  String get clearHistory => '기록을 지우시겠습니까?';
+
+  @override
+  String get clearRecentlyPlayed => '최근 재생 지우기';
+
+  @override
+  String get contentMarket => '콘텐츠 마켓';
+
+  @override
+  String get continueListening => '계속 듣기';
+
+  @override
+  String get continueVideoPlaybackInASmallWindow => '작은 창에서 동영상 재생 계속하기';
+
+  @override
+  String get create => '만들기';
+
+  @override
+  String get createAPlaylistToGetStarted => '시작하려면 플레이리스트를 만드세요';
+
+  @override
+  String currentSelectedcountry(Object country) {
+    return '현재: $country';
+  }
+
+  @override
+  String get deletePlaylist => '플레이리스트 삭제';
+
+  @override
+  String get editProfile => '프로필 수정';
+
+  @override
+  String errorLoadingMarkets(Object err) {
+    return '마켓을 불러오는 중 오류 발생: $err';
+  }
+
+  @override
+  String error(Object error) {
+    return '오류: $error';
+  }
+
+  @override
+  String explore(Object genre) {
+    return '$genre 둘러보기';
+  }
+
+  @override
+  String get fansAlsoLike => '팬들이 좋아하는 음악';
+
+  @override
+  String featuringTouppercase(Object artist) {
+    return '피처링 $artist';
+  }
+
+  @override
+  String get featuredPlaylists => '추천 플레이리스트';
+
+  @override
+  String get followArtistsToSeeThemHere => '아티스트를 팔로우하면 여기에 표시됩니다';
+
+  @override
+  String get followStationsToSeeThemHere => '스테이션을 팔로우하면 여기에 표시됩니다';
+
+  @override
+  String get forceAudioonlyStreamsToSaveData => '데이터를 절약하기 위해 오디오 전용 스트림 강제 사용';
+
+  @override
+  String get freesUpSpaceAndForcesFreshDataOnNextLoad =>
+      '공간을 확보하고 다음 로드 시 새 데이터를 강제로 가져옵니다';
+
+  @override
+  String get fromYourFavorites => '즐겨찾기에서';
+
+  @override
+  String get goBack => '뒤로 가기';
+
+  @override
+  String inspiredByName(Object name) {
+    return '$name에서 영감을 받아';
+  }
+
+  @override
+  String get keepPlayingSimilarTracksWhenQueueEnds => '대기열이 끝나면 비슷한 트랙 계속 재생';
+
+  @override
+  String get library => '라이브러리';
+
+  @override
+  String get likeAlbumsToSeeThemHere => '앨범에 \'좋아요\'를 누르면 여기에 표시됩니다';
+
+  @override
+  String get likedSongs => '좋아요 표시한 곡';
+
+  @override
+  String get lowDataMode => '데이터 절약 모드';
+
+  @override
+  String get madeForYou => '맞춤 믹스';
+
+  @override
+  String moreLikeName(Object name) {
+    return '$name와 비슷한 음악';
+  }
+
+  @override
+  String get moreOptions => '추가 옵션';
+
+  @override
+  String get nameYourMasterpiece => '멋진 이름을 지어주세요...';
+
+  @override
+  String get newPlaylist => '새 플레이리스트';
+
+  @override
+  String get newReleases => '새로운 릴리스';
+
+  @override
+  String get next => '다음';
+
+  @override
+  String get noAlbumsFound => '앨범을 찾을 수 없습니다';
+
+  @override
+  String get noArtistsFollowed => '팔로우한 아티스트가 없습니다';
+
+  @override
+  String get noArtistsFound => '아티스트를 찾을 수 없습니다';
+
+  @override
+  String get noLikedAlbums => '좋아요 표시한 앨범이 없습니다';
+
+  @override
+  String get noPlaylistsFound => '플레이리스트를 찾을 수 없습니다';
+
+  @override
+  String get noPlaylistsYet => '아직 플레이리스트가 없습니다';
+
+  @override
+  String get noResultsFound => '결과를 찾을 수 없습니다';
+
+  @override
+  String get noStationsFollowed => '팔로우한 스테이션이 없습니다';
+
+  @override
+  String get noTrackPlaying => '재생 중인 트랙이 없습니다';
+
+  @override
+  String get noTracksFound => '트랙을 찾을 수 없습니다';
+
+  @override
+  String get playlists => '플레이리스트';
+
+  @override
+  String get popular => '인기';
+
+  @override
+  String get permanentlyRemoveListeningHistory => '청취 기록 영구 삭제';
+
+  @override
+  String get pictureinpicturePip => 'PIP 모드 (Picture-in-Picture)';
+
+  @override
+  String get popularAlbums => '인기 앨범';
+
+  @override
+  String get popularArtists => '인기 아티스트';
+
+  @override
+  String get popularGenres => '인기 장르';
+
+  @override
+  String get popularSongs => '인기 곡';
+
+  @override
+  String get popularTracks => '인기 트랙';
+
+  @override
+  String get popularHitsRightNow => '지금 인기 있는 히트곡';
+
+  @override
+  String get previous => '이전';
+
+  @override
+  String get queue => '대기열';
+
+  @override
+  String get recentSearches => '최근 검색';
+
+  @override
+  String get recommendedForYou => '추천 음악';
+
+  @override
+  String get scraping => '스크랩 중';
+
+  @override
+  String get search => '검색';
+
+  @override
+  String get searchInAlbum => '앨범에서 검색...';
+
+  @override
+  String get searchInLibrary => '라이브러리에서 검색...';
+
+  @override
+  String get searchInPlaylist => '플레이리스트에서 검색';
+
+  @override
+  String get searchLikedSongs => '좋아요 표시한 곡에서 검색...';
+
+  @override
+  String get searchPopularSongs => '인기 곡 검색...';
+
+  @override
+  String get selectMarket => '마켓 선택';
+
+  @override
+  String get settings => '설정';
+
+  @override
+  String get showVideoPlayer => '동영상 플레이어 표시';
+
+  @override
+  String get shuffle => '셔플';
+
+  @override
+  String get spotifyCredentials => 'Spotify 자격 증명';
+
+  @override
+  String get suggestedStations => '추천 스테이션';
+
+  @override
+  String get tracks => '트랙';
+
+  @override
+  String get trending => '트렌딩';
+
+  @override
+  String get tryAgain => '다시 시도';
+
+  @override
+  String get tryADifferentSearchTerm => '다른 검색어를 시도해 보세요';
+
+  @override
+  String get useYoutubePlayerWhenAvailable => '가능한 경우 YouTube 플레이어 사용';
+
+  @override
+  String get video => '비디오';
+
+  @override
+  String get whatDoYouWantToListenTo => '어떤 음악을 듣고 싶으신가요?';
+
+  @override
+  String get youtubeCredentials => 'YouTube 자격 증명';
+
+  @override
+  String get yourLibrary => '내 라이브러리';
+
+  @override
+  String get playerscreenviewswitch => '플레이어_화면_보기_전환';
+
+  @override
+  String get addToPlaylist => '플레이리스트에 추가';
+
+  @override
+  String get addToQueue => '대기열에 추가';
+
+  @override
+  String get copyId => 'ID 복사';
+
+  @override
+  String get copyLink => '링크 복사';
+
+  @override
+  String get copySpotifyLink => 'Spotify 링크 복사';
+
+  @override
+  String get copyYouTubeLink => 'YouTube 링크 복사';
+
+  @override
+  String get copySpotifyId => 'Spotify ID 복사';
+
+  @override
+  String get copyYouTubeId => 'YouTube ID 복사';
+
+  @override
+  String get idCopied => 'ID가 복사되었습니다';
+
+  @override
+  String get discover => '둘러보기';
+
+  @override
+  String get enterYourName => '이름을 입력하세요';
+
+  @override
+  String get favorites => '즐겨찾기';
+
+  @override
+  String get goToAlbum => '앨범으로 이동';
+
+  @override
+  String get goToArtist => '아티스트로 이동';
+
+  @override
+  String get goToArtistRadio => '아티스트 라디오로 이동';
+
+  @override
+  String get goToPlaylist => '플레이리스트로 이동';
+
+  @override
+  String get goToSongRadio => '곡 라디오로 이동';
+
+  @override
+  String get home => '홈';
+
+  @override
+  String get myAwesomePlaylist => '나의 멋진 플레이리스트';
+
+  @override
+  String get myPlaylist => '내 플레이리스트';
+
+  @override
+  String get newPlaylist1 => '새 플레이리스트';
+
+  @override
+  String get play => '재생';
+
+  @override
+  String get playStation => '스테이션 재생';
+
+  @override
+  String get playNext => '다음 재생';
+
+  @override
+  String get playlist => '플레이리스트';
+
+  @override
+  String get playlistName => '플레이리스트 이름';
+
+  @override
+  String get playlists1 => '플레이리스트';
+
+  @override
+  String get queue1 => '대기열';
+
+  @override
+  String get queueNowPlaying => '지금 재생 중';
+
+  @override
+  String get queueUpNext => '다음 트랙';
+
+  @override
+  String get recentlyPlayed => '최근 재생';
+
+  @override
+  String get removeFromQueue => '대기열에서 삭제';
+
+  @override
+  String get retry => '다시 시도';
+
+  @override
+  String get searchMusicArtistsAlbums => '음악, 아티스트, 앨범 검색...';
+
+  @override
+  String get share => '공유';
+
+  @override
+  String featuringArtist(String artistName) {
+    return '피처링: $artistName';
+  }
+
+  @override
+  String currentCountry(String country) {
+    return '현재: $country';
+  }
+
+  @override
+  String get queueTooltip => '대기열';
+
+  @override
+  String get searchHint => '음악, 아티스트, 앨범 검색...';
+
+  @override
+  String get language => '언어';
+
+  @override
+  String get systemDefault => '시스템 기본값';
+
+  @override
+  String get songsTab => '곡';
+
+  @override
+  String get foldersTab => '폴더';
+
+  @override
+  String get artistsTab => '아티스트';
+
+  @override
+  String get albumsTab => '앨범';
+
+  @override
+  String get genresTab => '장르';
+
+  @override
+  String get noLocalGenres => 'No local genres found';
+
+  @override
+  String get playbackSpeed => '재생 속도';
+
+  @override
+  String get addMusic => '음악 추가';
+
+  @override
+  String get addFiles => '파일 추가';
+
+  @override
+  String get addFolder => '폴더 추가';
+
+  @override
+  String get rescanLibrary => '라이브러리 재검색';
+
+  @override
+  String get sortTitle => '제목순으로 정렬';
+
+  @override
+  String get sortArtist => '아티스트순으로 정렬';
+
+  @override
+  String get sortAlbum => '앨범순으로 정렬';
+
+  @override
+  String get sortDuration => '시간순으로 정렬';
+
+  @override
+  String get sortDateAdded => '추가된 날짜순으로 정렬';
+
+  @override
+  String get sortBy => '정렬 기준';
+
+  @override
+  String get trackInformation => '트랙 정보';
+
+  @override
+  String get removeFromLibrary => '라이브러리에서 제거';
+
+  @override
+  String get showInFolder => '폴더에 표시';
+
+  @override
+  String get unknownArtist => '알 수 없는 아티스트';
+
+  @override
+  String get unknownAlbum => '알 수 없는 앨범';
+
+  @override
+  String get importedFiles => '가져온 파일';
+
+  @override
+  String get playFolder => '폴더 재생';
+
+  @override
+  String get shuffleFolder => '폴더 셔플 재생';
+
+  @override
+  String get playAll => '모두 재생';
+
+  @override
+  String get includeSubfolders => '하위 폴더 포함';
+
+  @override
+  String trackCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 트랙',
+      one: '1 트랙',
+      zero: '0 트랙',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get noLocalSongs => '로컬 곡을 찾을 수 없습니다';
+
+  @override
+  String get searchLocalMusic => '로컬 음악 검색...';
+
+  @override
+  String get viewAsList => '목록으로 보기';
+
+  @override
+  String get viewAsGrid => '그리드로 보기';
+
+  @override
+  String get trackInfoPath => '경로';
+
+  @override
+  String get trackInfoFormat => '형식';
+
+  @override
+  String get trackInfoDuration => '시간';
+
+  @override
+  String get aboutDescription => '무료 오픈소스 미디어 플레이어입니다.';
+
+  @override
+  String get aboutApp => 'PPPlayer 정보';
+
+  @override
+  String get appTagline => '당신의 음악. 당신의 방식대로.';
+
+  @override
+  String get exploreApp => 'PPPlayer 살펴보기';
+
+  @override
+  String get viewSource => '소스 보기';
+
+  @override
+  String get seeWhatsNew => '새로운 기능';
+
+  @override
+  String get getHelp => '도움 받기';
+
+  @override
+  String versionInfo(Object version, Object build) {
+    return '버전 $version (빌드 $build)';
+  }
+
+  @override
+  String get createdBy => '제작: Lucas Coelho';
+
+  @override
+  String get website => '웹사이트';
+
+  @override
+  String get github => 'GitHub';
+
+  @override
+  String get releaseNotes => '출시 노트';
+
+  @override
+  String get support => '지원';
+
+  @override
+  String get license => '라이선스';
+
+  @override
+  String get acknowledgments => '감사 인사';
+
+  @override
+  String get close => '닫기';
+
+  @override
+  String copyright(Object year) {
+    return '© $year PPPlayer 기여자';
+  }
+
+  @override
+  String get goodMorning => '좋은 아침입니다';
+
+  @override
+  String get goodAfternoon => '좋은 오후입니다';
+
+  @override
+  String get goodEvening => '좋은 저녁입니다';
+
+  @override
+  String greetingWithName(Object greeting, Object name) {
+    return '$greeting, $name';
+  }
+
+  @override
+  String get yourMusicIsWaiting => '당신의 음악이 기다리고 있습니다.';
+
+  @override
+  String dailyMix(Object number) {
+    return '데일리 믹스 $number';
+  }
+
+  @override
+  String get yourFavoritesAndNewDiscoveries => '즐겨찾기\n그리고 새로운 발견';
+
+  @override
+  String get discoverWeekly => '주간 추천';
+
+  @override
+  String get releaseRadar => '신곡 레이더';
+
+  @override
+  String get newMusicJustForYou => '오직 당신을 위한\n새로운 음악';
+
+  @override
+  String get chillMix => '칠 믹스';
+
+  @override
+  String get relaxAndUnwind => '휴식과 힐링';
+
+  @override
+  String get focusMix => '포커스 믹스';
+
+  @override
+  String get deepFocusAndProductivity => '깊은 집중\n그리고 생산성';
+
+  @override
+  String artistRadio(Object artist) {
+    return '$artist 라디오';
+  }
+
+  @override
+  String genreRadio(Object genre) {
+    return '$genre 라디오';
+  }
+
+  @override
+  String get filterAll => '모두';
+
+  @override
+  String get filterPlaylists => '플레이리스트';
+
+  @override
+  String get filterArtists => '아티스트';
+
+  @override
+  String get filterAlbums => '앨범';
+
+  @override
+  String get filterStations => '스테이션';
+
+  @override
+  String get filterStreams => '스트림';
+
+  @override
+  String get localMusicCard => '로컬 음악';
+
+  @override
+  String get createPlaylistButton => '플레이리스트 만들기';
+
+  @override
+  String get radioStations => '라디오 스테이션';
+
+  @override
+  String get discoverMusic => '음악 찾기';
+
+  @override
+  String get importLocalMusic => '로컬 음악 가져오기';
+
+  @override
+  String get importAudioFiles => '오디오 파일 가져오기';
+
+  @override
+  String get importFolder => '폴더 가져오기';
+
+  @override
+  String get importFolderSubtitle => '오디오 파일이 포함된 폴더를 선택하세요';
+
+  @override
+  String get importPlaylist => '재생 목록 가져오기';
+
+  @override
+  String get importPlaylistSubtitle => '.m3u 또는 .m3u8 파일 가져오기';
+
+  @override
+  String get exportPlaylist => '재생 목록 내보내기';
+
+  @override
+  String get playbackErrorUnsupportedFormat => '지원되지 않는 형식이거나 손상된 파일';
+
+  @override
+  String get playbackErrorFileInaccessible => '파일에 액세스할 수 없거나 찾을 수 없음';
+
+  @override
+  String get localVideosCard => '로컬 비디오';
+
+  @override
+  String get noLocalVideos => '비디오를 찾을 수 없음';
+
+  @override
+  String get searchLocalVideos => '로컬 비디오 검색';
+
+  @override
+  String get addVideos => '비디오 추가';
+
+  @override
+  String get subtitles => '자막';
+
+  @override
+  String get audioTracks => '오디오 트랙';
+
+  @override
+  String get loadSubtitleFile => '자막 파일 불러오기...';
+
+  @override
+  String errorLoadingSubtitle(String error) {
+    return '자막을 로드하는 중 오류 발생: $error';
+  }
+
+  @override
+  String get off => '끄기';
+
+  @override
+  String get playOn => '재생 기기';
+
+  @override
+  String get thisDevice => '이 기기';
+
+  @override
+  String get availableDevices => '사용 가능한 기기';
+
+  @override
+  String get searchingDevices => '기기 검색 중…';
+
+  @override
+  String get refresh => '새로고침';
+
+  @override
+  String get connecting => '연결 중…';
+
+  @override
+  String connectingTo(String name) {
+    return '$name에 연결 중…';
+  }
+
+  @override
+  String get connected => '연결됨';
+
+  @override
+  String get unsupportedOutput => '이 출력에서는 이 소스를 재생할 수 없습니다.';
+
+  @override
+  String get airPlayAudioOutput => 'AirPlay 및 오디오 출력';
+
+  @override
+  String get returnForAirPlay => 'AirPlay를 사용하려면 이 기기에서 재생하세요.';
+
+  @override
+  String get openSoundSettings => '출력을 선택하려면 사운드 설정을 여세요.';
+
+  @override
+  String get soundSettingsError => '사운드 설정을 열 수 없습니다.';
+
+  @override
+  String get systemOutput => '시스템 출력';
+
+  @override
+  String playingOn(String name) {
+    return '$name에서 재생 중';
+  }
+
+  @override
+  String get chooseAirPlay => 'AirPlay 버튼을 눌러 스피커나 TV를 선택하세요.';
+
+  @override
+  String get airPlayDevice => 'AirPlay 기기';
+
+  @override
+  String get playOnIphone => '이 iPhone에서 재생';
+
+  @override
+  String get chooseIphone => '아래 AirPlay 버튼으로 이 iPhone을 선택하세요.';
+
+  @override
+  String get profile => '프로필';
+
+  @override
+  String get preferences => '환경설정';
+
+  @override
+  String get themeColor => '테마 색상';
+
+  @override
+  String get yourMusic => '내 음악';
+
+  @override
+  String get apiCredentials => 'API 인증 정보';
+
+  @override
+  String get dataStorage => '데이터 및 저장 공간';
+
+  @override
+  String get editProfileHelp => '이름과 아바타 설정';
+
+  @override
+  String get customProvider => '사용자 지정 제공자';
+
+  @override
+  String get defaultProvider => 'PPPlayer 기본값';
+
+  @override
+  String get proExperience => 'Pro 기능 활성화';
+
+  @override
+  String get beta => '베타';
+
+  @override
+  String get loading => '불러오는 중…';
+
+  @override
+  String get unknown => '알 수 없음';
+
+  @override
+  String get pause => '일시정지';
+
+  @override
+  String get repeat => '반복';
+
+  @override
+  String get mute => '음소거';
+
+  @override
+  String get unmute => '음소거 해제';
+
+  @override
+  String get fitVideo => '맞춤';
+
+  @override
+  String get fillVideo => '채우기';
+
+  @override
+  String get fullscreen => '전체 화면';
+
+  @override
+  String get exitFullscreen => '전체 화면 종료';
+
+  @override
+  String get volume => '음량';
+
+  @override
+  String get save => '저장';
+
+  @override
+  String get delete => '삭제';
+
+  @override
+  String get clear => '지우기';
+
+  @override
+  String get follow => '팔로우';
+
+  @override
+  String get unfollow => '팔로우 취소';
+
+  @override
+  String get following => '팔로우 중';
+
+  @override
+  String get showAll => '모두 표시';
+
+  @override
+  String get appearance => '모양';
+
+  @override
+  String get subtitleSize => '크기';
+
+  @override
+  String get subtitleBackground => '배경';
+
+  @override
+  String get earlier => '앞당기기';
+
+  @override
+  String get later => '늦추기';
+
+  @override
+  String get reset => '초기화';
+
+  @override
+  String subtitleDelay(String seconds) {
+    return '지연: $seconds초';
+  }
+
+  @override
+  String get morePlaybackControls => '추가 재생 컨트롤';
+
+  @override
+  String get hideVideo => '동영상 숨기기';
+
+  @override
+  String get showVideo => '동영상 표시';
+
+  @override
+  String get closeQueue => '대기열 닫기';
+
+  @override
+  String get enabled => '켜짐';
+
+  @override
+  String get openFile => '파일 열기…';
+
+  @override
+  String get openFolder => '폴더 열기…';
+
+  @override
+  String get openUrl => 'URL 열기…';
+
+  @override
+  String get fileMenu => '파일';
+
+  @override
+  String get viewMenu => '보기';
+
+  @override
+  String get windowMenu => '창';
+
+  @override
+  String get saveChanges => '변경 사항 저장';
+
+  @override
+  String get themeAvatarColor => '테마 및 아바타 색상';
+
+  @override
+  String get networkStreams => '네트워크 스트림';
+
+  @override
+  String get networkStream => '네트워크 스트림';
+
+  @override
+  String get openNetworkStream => '네트워크 스트림 열기';
+
+  @override
+  String get editPlaylist => '재생목록 편집';
+
+  @override
+  String get editStreamItem => '스트림 항목 편집';
+
+  @override
+  String get streamUrl => '스트림 URL';
+
+  @override
+  String get platformType => '플랫폼 / 유형';
+
+  @override
+  String get optionalTitle => '제목 (선택 사항)';
+
+  @override
+  String get optionalImageUrl => '이미지 URL (선택 사항)';
+
+  @override
+  String get myStream => '내 스트림';
+
+  @override
+  String get saveToLibrary => '라이브러리에 저장';
+
+  @override
+  String get justPlay => '재생만 하기';
+
+  @override
+  String get autoDetect => '자동 감지';
+
+  @override
+  String get apiKeyRequired => 'API 키 필요';
+
+  @override
+  String get customApiKey => '사용자 지정 API 키 사용';
+
+  @override
+  String get clientId => '클라이언트 ID';
+
+  @override
+  String get clientSecret => '클라이언트 시크릿';
+
+  @override
+  String get saveCredentials => '인증 정보 저장';
+
+  @override
+  String get searchStrategy => '검색 방식';
+
+  @override
+  String get credentialsLocalOnly => '이 기기에 안전하게 저장됩니다. PPPlayer에 전송되지 않습니다.';
+
+  @override
+  String get scrapingHelp => 'API 키나 할당량이 필요하지 않습니다. 더 느리거나 신뢰성이 낮을 수 있습니다.';
+
+  @override
+  String get streamHelp => 'HTTP(S) URL 또는 M3U 재생목록 링크를 입력하세요.';
+
+  @override
+  String get deletePlaylistConfirm => '이 재생목록을 영구 삭제할까요?';
+
+  @override
+  String get clearCacheConfirm => '캐시 데이터를 삭제할까요? 라이브러리와 즐겨찾기는 유지됩니다.';
+
+  @override
+  String get clearHistoryConfirm => '청취 기록을 영구 삭제할까요?';
+
+  @override
+  String get addedToQueue => '대기열에 추가됨';
+
+  @override
+  String get addedVideo => '동영상 추가됨';
+
+  @override
+  String addedChannels(String count) {
+    return '추가한 채널: $count';
+  }
+
+  @override
+  String get removedFromPlaylist => '재생목록에서 삭제됨';
+
+  @override
+  String get exportCancelled => '내보내기 취소됨';
+
+  @override
+  String exportComplete(String count) {
+    return '재생목록을 내보냈습니다. 건너뛴 항목: $count';
+  }
+
+  @override
+  String get playlistExported => '재생목록을 내보냈습니다';
+
+  @override
+  String get live => '실시간';
+
+  @override
+  String get sponsored => '스폰서';
+
+  @override
+  String get removeFromPlaylist => '재생목록에서 제거';
+
+  @override
+  String get likedSongsHelp => '노래를 저장하면 여기에 표시됩니다';
+
+  @override
+  String get apiSingleVideoHint => '재생목록을 가져오지 않고 이 동영상을 추가할 수 있습니다.';
+
+  @override
+  String get linkCopied => '링크 복사됨';
+
+  @override
+  String get willPlayNext => '다음에 재생됩니다';
+
+  @override
+  String get checkItOut => '살펴보기';
+
+  @override
+  String get loadFailed => '콘텐츠를 불러올 수 없습니다. 다시 시도하세요.';
+
+  @override
+  String get removeFolder => '폴더 제거';
+
+  @override
+  String get removeFolderConfirmTitle => '폴더를 제거할까요?';
+
+  @override
+  String removeFolderConfirmMessage(String name) {
+    return '라이브러리에서 \"$name\" 및 해당 미디어를 제거할까요? 디스크의 파일은 삭제되지 않습니다.';
+  }
+
+  @override
+  String fileMissingOnDisk(String name) {
+    return '디스크에서 \"$name\" 파일을 찾을 수 없습니다';
+  }
+
+  @override
+  String get folderUnavailable => '폴더를 사용할 수 없습니다. 드라이브가 연결되어 있는지 확인하세요.';
+
+  @override
+  String fileAlreadyImported(String name) {
+    return '\"$name\" 파일이 이미 라이브러리에 있습니다';
+  }
+
+  @override
+  String filesAlreadyImported(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count개의 파일이 이미 라이브러리에 있습니다',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get folderAlreadyImported => '이미 가져온 폴더입니다 — 새 파일 확인 중';
+
+  @override
+  String get rescanCompleted => '라이브러리 다시 검사 완료';
+
+  @override
+  String rescanFailed(String error) {
+    return '폴더 다시 검사 실패: $error';
+  }
+
+  @override
+  String get importedFolderFallback => '가져온 폴더';
+}

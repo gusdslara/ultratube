@@ -1,0 +1,3154 @@
+import 'package:ppplayer/l10n/app_localizations.dart';
+
+import 'dart:ui';
+import 'package:flutter/material.dart' hide RepeatMode;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import '../../core/playback/playback_providers.dart';
+import '../../core/player/player_provider.dart';
+import '../../core/player/video_layout_provider.dart';
+import '../../core/services/settings_provider.dart';
+import '../../features/player/player_providers.dart';
+import '../../features/player/queue_page.dart';
+import '../../features/player/queue_presentation.dart' as queue_ui;
+import '../../core/providers/search_provider.dart';
+import '../../shared/widgets/tactile_buttons.dart';
+import '../../shared/widgets/pp_image.dart';
+import 'user_avatar.dart';
+import 'profile_modal.dart';
+import 'premium_modals.dart';
+import '../../core/db/app_database.dart' as db;
+import 'artists_links.dart';
+import 'context_menu/content_context_menu.dart';
+import 'shared_search_input.dart';
+import '../../core/models/track.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:media_kit_video/media_kit_video.dart' as mk;
+import '../../features/settings/widgets/about_dialog.dart';
+import '../../core/local_library/local_library_service.dart';
+import '../../features/network_streams/network_stream_dialog.dart';
+import 'package:flutter/services.dart';
+import 'package:fullscreen_window/fullscreen_window.dart';
+import '../../core/network_outputs/network_output_providers.dart';
+import '../../features/network_outputs/output_picker.dart';
+import 'compact_desktop_navigation.dart';
+import '../../features/ultratube/ut_shell.dart';
+import 'player_route_transition.dart';
+import '../layout/responsive_navigation.dart';
+import '../layout/safe_area_padding.dart';
+import '../../core/ultratube/ultratube_platform.dart';
+import '../../core/twitch/twitch_store.dart' show twitchRouteFor;
+
+class ScaffoldWithNav extends ConsumerStatefulWidget {
+  const ScaffoldWithNav({
+    super.key,
+    required this.child,
+    required this.location,
+  });
+  final Widget child;
+  final String location;
+
+  @override
+  ConsumerState<ScaffoldWithNav> createState() => _ScaffoldWithNavState();
+}
+
+class _ScaffoldWithNavState extends ConsumerState<ScaffoldWithNav> {
+  final GlobalKey _stackKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final playbackEngine = ref.watch(playbackControllerProvider);
+    // Watch only structural identity — NOT position/buffered (those are 10 Hz).
+    // This prevents the entire ScaffoldWithNav from rebuilding on every tick.
+    ref.watch(
+      playbackStatusProvider.select((a) {
+        final v = a.value;
+        return (
+          v?.activeVideoId,
+          v?.isIFrameMode ?? false,
+          v?.hasVideo ?? false,
+          v?.state ?? PlaybackState.idle,
+        );
+      }),
+    );
+    // Read full status without subscribing for widgets that need it inline.
+    final playbackStatus =
+        ref.read(playbackStatusProvider).value ?? const PlaybackStatus();
+
+    final settings = ref.watch(settingsProvider);
+    final showVideo = settings.showVideo;
+    final isPlayerScreen = {
+      '/player',
+      '/shorts',
+      '/watch',
+      '/twitch/watch',
+    }.contains(Uri.parse(widget.location).path);
+    // Android phones use the Ultratube shell (YouTube-style nav + mini player).
+    final ultratubeShell = !kIsWeb && Platform.isAndroid;
+    final showQueuePanel =
+        ref.watch(queue_ui.queuePanelProvider) &&
+        queue_ui.supportsQueuePanel(context) &&
+        !ref.watch(isFullscreenProvider);
+    final currentTrack = ref.watch(
+      playerProvider.select((s) => s.currentTrack),
+    );
+    final isLocalTrack = currentTrack?.sourceType == TrackSourceType.local;
+    final hasVideoId = isLocalTrack
+        ? currentTrack?.isVideoFile == true && playbackStatus.hasVideo
+        : ref.watch(playerProvider.select((s) => s.videoId != null)) &&
+              playbackStatus.hasVideo;
+    final loadError = ref.watch(playerProvider.select((s) => s.loadError));
+    final hasNextTrack = ref.watch(
+      playerProvider.select((s) {
+        final q = s.playbackQueue;
+        return q.tracks.length > 1 && q.currentIndex + 1 < q.tracks.length;
+      }),
+    );
+    final isPipMode = ref.watch(playerProvider.select((s) => s.isPipMode));
+    final isFullscreen = ref.watch(isFullscreenProvider);
+    final videoFitMode = ref.watch(
+      settingsProvider.select((s) => s.videoFitMode),
+    );
+    final videoFit = videoFitMode == VideoFitMode.fit
+        ? BoxFit.contain
+        : BoxFit.cover;
+
+    // viewPadding follows the current orientation and remains available when
+    // system UI temporarily removes padding. Never retain another orientation's
+    // notch or home-indicator insets.
+    final stablePadding = currentSafeAreaPadding(
+      MediaQuery.of(context),
+      preserveViewPadding: !kIsWeb && Platform.isIOS,
+    );
+
+    final screenSize = MediaQuery.sizeOf(context);
+    final screenWidth = screenSize.width;
+
+    final videoLayout = ref.watch(videoLayoutProvider);
+
+    // ---------------------------------------------------------------
+    // ---------------------------------------------------------------
+    // KEY INSIGHT: When WKWebView.visibleRect == NSRect.zero, WebKit
+    // suspends the JavaScript engine entirely (not just throttles it).
+    // This means our JS guardian timer can't run → YouTube stays paused.
+    //
+    // FIX: Always keep at least a 2×2 px "peek" inside the window bounds.
+    //   visibleRect = 2×2 ≠ zero → WebKit keeps JS alive → guardian fires
+    //   every 150 ms → any YouTube auto-pause is reversed within one tick.
+    //
+    // The peek is positioned at the extreme bottom-right corner and is
+    // imperceptible to users. We achieve it by combining:
+    //   top:   screenHeight - kPeek  (only kPeek rows visible at bottom)
+    //   right: -(kMinW - kPeek)      (negative = extend past the right edge,
+    //                                 so only kPeek columns visible)
+    // ---------------------------------------------------------------
+    const double kMinW = 160;
+    const double kMinH = 90;
+    const double kPeek = 2.0; // px kept inside window to avoid JS suspension
+    // On Windows, the Win32 floating webview ignores Flutter layout constraints
+    // and clamps itself to the visible screen area. We must use a large negative
+    // top/left position to truly move it off-screen, while keeping kMinW x kMinH
+    // so the underlying JS engine stays alive.
+    final isWindows = !kIsWeb && Platform.isWindows;
+    const double kOffScreen = -9999.0;
+
+    final pipPresentation =
+        isPipMode ||
+        ref.watch(playerProvider.select((s) => s.isPipRequestPending));
+    final isDesktop = usesWideNavigation(context);
+
+    final maxQueueWidth = (screenWidth - (isDesktop ? 240 : 0) - 340).clamp(
+      queue_ui.kMinQueuePanelWidth,
+      queue_ui.kMaxQueuePanelWidth,
+    );
+    final rawQueueWidth = ref.watch(queue_ui.queuePanelWidthProvider);
+    final effectiveQueueWidth = rawQueueWidth.clamp(
+      queue_ui.kMinQueuePanelWidth,
+      maxQueueWidth,
+    );
+    final queueTotalWidth = showQueuePanel ? (effectiveQueueWidth + 10.0) : 0.0;
+
+    Rect? normalBounds;
+    bool showShadow = false;
+    double renderRadius = 0;
+
+    // Calculate bottom bar height mathematically to avoid 1-frame RenderBox lag out of Offstage
+    final bottomBarHeight = (isPlayerScreen || pipPresentation)
+        ? 0.0
+        : (isDesktop
+              ? 90.0
+              : (68.0 +
+                    stablePadding.bottom +
+                    72.0)); // 68 (nav) + 72 (miniplayer)
+
+    if (isPlayerScreen) {
+      if (videoLayout.isVisible && videoLayout.isReady) {
+        var rect = Rect.fromLTWH(
+          videoLayout.position.dx,
+          videoLayout.position.dy,
+          videoLayout.size.width,
+          videoLayout.size.height,
+        );
+        // Only legacy floating WebView2 windows need room outside their bounds
+        // for Flutter controls. Chromium's Widget renderer is composited below
+        // PlayerOverlays, so it can fill the player behind those controls even
+        // though online playback also reports isIFrameMode.
+        if (isWindows &&
+            playbackStatus.isIFrameMode &&
+            playbackEngine.renderer is! Widget) {
+          const double kControlsTopH =
+              72.0; // collapse button + toggle tabs bar
+          const double kControlsBottomH =
+              230.0; // metadata + seek slider + button row
+          final newH = (rect.height - kControlsTopH - kControlsBottomH).clamp(
+            0.0,
+            double.infinity,
+          );
+          rect = Rect.fromLTWH(
+            rect.left,
+            rect.top + kControlsTopH,
+            rect.width,
+            newH,
+          );
+        }
+        normalBounds = rect;
+        renderRadius = 24;
+      } else {
+        normalBounds = isWindows
+            ? const Rect.fromLTWH(kOffScreen, kOffScreen, kMinW, kMinH)
+            : Rect.fromLTWH(
+                screenWidth - kPeek,
+                screenSize.height - kPeek,
+                kPeek,
+                kPeek,
+              );
+      }
+    } else {
+      if (showVideo && hasVideoId && ultratubeShell) {
+        // Live video lives inside the mini player's thumbnail slot.
+        normalBounds = UtShellMetrics.miniThumbRect(screenSize, stablePadding.bottom);
+        renderRadius = 6;
+      } else if (showVideo && hasVideoId) {
+        final left = screenWidth - queueTotalWidth - kMinW - 16;
+        final top = screenSize.height - bottomBarHeight - kMinH - 8;
+        normalBounds = Rect.fromLTWH(left, top, kMinW, kMinH);
+        renderRadius = 12;
+        showShadow = true;
+      } else {
+        normalBounds = isWindows
+            ? const Rect.fromLTWH(kOffScreen, kOffScreen, kMinW, kMinH)
+            : Rect.fromLTWH(
+                screenWidth - kPeek,
+                screenSize.height - kPeek,
+                kPeek,
+                kPeek,
+              );
+      }
+    }
+
+    // Keep both endpoints available while the route reverses on close.
+    final collapsedBounds = ultratubeShell
+        ? UtShellMetrics.miniThumbRect(screenSize, stablePadding.bottom)
+        : Rect.fromLTWH(
+      screenWidth - queueTotalWidth - kMinW - 16,
+      screenSize.height -
+          (isDesktop ? 90.0 : 68.0 + stablePadding.bottom + 72.0) -
+          kMinH -
+          8,
+      kMinW,
+      kMinH,
+    );
+    final expandedBounds = videoLayout.isReady && videoLayout.isVisible
+        ? Rect.fromLTWH(
+            videoLayout.position.dx,
+            videoLayout.position.dy,
+            videoLayout.size.width,
+            videoLayout.size.height,
+          )
+        : Rect.fromLTWH(
+            0,
+            stablePadding.top,
+            screenWidth,
+            screenSize.height - stablePadding.top,
+          );
+    final routeTransition = ref.watch(playerRouteTransitionProvider);
+    final animatePlayerRoute =
+        showVideo &&
+        hasVideoId &&
+        settings.playerView == PlayerView.video &&
+        !pipPresentation &&
+        !(isWindows && playbackEngine.renderer is! Widget);
+
+    Widget normalLayout = Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            if (isDesktop && !isPlayerScreen && !isPipMode && !isFullscreen)
+              const _DesktopSidebar(),
+            Expanded(
+              child: Stack(
+                children: [
+                  // Gradient Background & Animated Mesh (PPPlayer look only)
+                  if (!isPlayerScreen && !ultratubeShell)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Container(
+                        width: 800,
+                        height: 600,
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: const Alignment(0.8, -0.8),
+                            radius: 1.5,
+                            colors: [
+                              const Color(
+                                0xFF4A1010,
+                              ).withValues(alpha: 0.5), // Dark red
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                        child: CustomPaint(
+                          painter: _MeshPainter(
+                            primaryColor: Theme.of(context).colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  Column(
+                    children: [
+                      if (isDesktop &&
+                          !isPlayerScreen &&
+                          !isPipMode &&
+                          !isFullscreen)
+                        const _DesktopTopBar(),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Stack(
+                                key: _stackKey,
+                                children: [widget.child],
+                              ),
+                            ),
+                            if (showQueuePanel) ...[
+                              _QueueResizeDivider(
+                                onResize: (delta) {
+                                  final current = ref.read(
+                                    queue_ui.queuePanelWidthProvider,
+                                  );
+                                  var target = current - delta;
+                                  if ((target -
+                                              queue_ui.kDefaultQueuePanelWidth)
+                                          .abs() <
+                                      8.0) {
+                                    target = queue_ui.kDefaultQueuePanelWidth;
+                                  }
+                                  final newWidth = target.clamp(
+                                    queue_ui.kMinQueuePanelWidth,
+                                    maxQueueWidth,
+                                  );
+                                  ref
+                                      .read(
+                                        queue_ui
+                                            .queuePanelWidthProvider
+                                            .notifier,
+                                      )
+                                      .setWidth(newWidth);
+                                },
+                                onReset: () {
+                                  ref
+                                      .read(
+                                        queue_ui
+                                            .queuePanelWidthProvider
+                                            .notifier,
+                                      )
+                                      .reset();
+                                },
+                              ),
+                              SizedBox(
+                                key: const ValueKey('queue_side_panel'),
+                                width: effectiveQueueWidth,
+                                child: QueuePage(
+                                  onClose: () => ref
+                                      .read(
+                                        queue_ui.queuePanelProvider.notifier,
+                                      )
+                                      .close(),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: isPlayerScreen || isPipMode || isFullscreen
+          ? null
+          : isDesktop
+          ? const DesktopPlayerBar()
+          : ultratubeShell
+          ? const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [UtMiniPlayer(), UtBottomNav()],
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [_MiniPlayerBar(), _BottomNavBar()],
+            ),
+    );
+
+    if (!kIsWeb && Platform.isMacOS) {
+      normalLayout = PlatformMenuBar(
+        menus: [
+          PlatformMenu(
+            label: 'Ultratube',
+            menus: [
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformMenuItem(
+                    label: AppLocalizations.of(context)!.aboutApp,
+                    onSelected: () async {
+                      if (context.mounted) {
+                        showDialog(
+                          context: context,
+                          builder: (context) => const PpAboutDialog(),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.servicesSubmenu,
+                  ),
+                ],
+              ),
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.hide,
+                  ),
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.hideOtherApplications,
+                  ),
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.showAllApplications,
+                  ),
+                ],
+              ),
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.quit,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          PlatformMenu(
+            label: AppLocalizations.of(context)!.fileMenu,
+            menus: [
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformMenuItem(
+                    label: AppLocalizations.of(context)!.openFile,
+                    shortcut: const SingleActivator(
+                      LogicalKeyboardKey.keyO,
+                      meta: true,
+                    ),
+                    onSelected: () async {
+                      final tracks = await ref
+                          .read(localLibraryServiceProvider)
+                          .importFiles();
+                      if (tracks.isNotEmpty) {
+                        ref
+                            .read(playerProvider.notifier)
+                            .playTrack(tracks.first);
+                      }
+                    },
+                  ),
+                  PlatformMenuItem(
+                    label: AppLocalizations.of(context)!.openFolder,
+                    shortcut: const SingleActivator(
+                      LogicalKeyboardKey.keyO,
+                      meta: true,
+                      shift: true,
+                    ),
+                    onSelected: () =>
+                        ref.read(localLibraryServiceProvider).importFolder(),
+                  ),
+                  PlatformMenuItem(
+                    label: AppLocalizations.of(context)!.openUrl,
+                    shortcut: const SingleActivator(
+                      LogicalKeyboardKey.keyU,
+                      meta: true,
+                    ),
+                    onSelected: () => showNetworkStreamDialog(context),
+                  ),
+                ],
+              ),
+
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformMenuItem(
+                    label: AppLocalizations.of(context)!.importPlaylist,
+                    onSelected: () =>
+                        ref.read(localLibraryServiceProvider).importPlaylist(),
+                  ),
+                ],
+              ),
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformMenuItem(
+                    label: AppLocalizations.of(context)!.exportPlaylist,
+                    onSelected: () {
+                      final queue = ref
+                          .read(playerProvider)
+                          .playbackQueue
+                          .tracks;
+                      if (queue.isNotEmpty) {
+                        ref
+                            .read(localLibraryServiceProvider)
+                            .exportQueue(queue);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          PlatformMenu(
+            label: AppLocalizations.of(context)!.viewMenu,
+            menus: [
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.toggleFullScreen,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          PlatformMenu(
+            label: AppLocalizations.of(context)!.windowMenu,
+            menus: [
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.minimizeWindow,
+                  ),
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.zoomWindow,
+                  ),
+                ],
+              ),
+              PlatformMenuItemGroup(
+                members: [
+                  PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.arrangeWindowsInFront,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+        child: normalLayout,
+      );
+    }
+
+    if (kDebugMode) {
+      final time = DateTime.now().toIso8601String().substring(11, 23);
+      debugPrint(
+        '$time [PipRender] '
+        'pending=${ref.read(playerProvider).isPipRequestPending} '
+        'active=${ref.read(playerProvider).isPipMode} '
+        'presentation=$pipPresentation '
+        'bounds=$normalBounds',
+      );
+    }
+
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(padding: stablePadding),
+      child: Focus(
+        autofocus: true,
+        canRequestFocus: true,
+        onKeyEvent: (node, event) {
+          // Only handle key down events to prevent triggering twice
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+          final primaryFocus = FocusManager.instance.primaryFocus;
+          if (primaryFocus != null && primaryFocus.context != null) {
+            final ctx = primaryFocus.context!;
+            final isTextInput =
+                ctx.widget is EditableText ||
+                ctx.findAncestorStateOfType<EditableTextState>() != null ||
+                ctx.findAncestorWidgetOfExactType<TextField>() != null;
+            if (isTextInput) {
+              return KeyEventResult.ignored;
+            }
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.space) {
+            final isPlaying = ref.read(playerProvider).isPlaying;
+            if (isPlaying) {
+              ref.read(playbackControllerProvider).pause();
+            } else {
+              ref.read(playbackControllerProvider).resume();
+            }
+            return KeyEventResult.handled;
+          }
+
+          if (event.logicalKey == LogicalKeyboardKey.keyF) {
+            final next = ref.read(isFullscreenProvider.notifier).toggle();
+            FullScreenWindow.setFullScreen(next);
+            return KeyEventResult.handled;
+          }
+
+          return KeyEventResult.ignored;
+        },
+        child: Material(
+          color: pipPresentation
+              ? Colors.black
+              : Theme.of(context).colorScheme.surface,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // When on PlayerScreen, the video MUST be under normalLayout so PlayerOverlays
+              // (which are inside PlayerScreen/normalLayout) can render on top of the native WebView.
+              // PlayerScreen has a transparent background, so the video shows through perfectly.
+              if (isPlayerScreen)
+                _PlaybackSurfaceLayer(
+                  key: const ValueKey('video_surface'),
+                  routeTransition: routeTransition,
+                  animatePlayerRoute: animatePlayerRoute,
+                  collapsedBounds: collapsedBounds,
+                  expandedBounds: expandedBounds,
+                  pipPresentation: pipPresentation,
+                  normalBounds: normalBounds,
+                  showShadow: showShadow,
+                  renderRadius: renderRadius,
+                  isWindows: isWindows,
+                  transparentBackground:
+                      playbackStatus.track?.isLocal == true &&
+                      !playbackStatus.hasVideo,
+                  child: Stack(
+                    children: [
+                      Offstage(
+                        offstage:
+                            playbackStatus.track?.isLocal == true &&
+                            !playbackStatus.hasVideo,
+                        child: _StablePlaybackView(
+                          controller: playbackEngine,
+                          status: playbackStatus,
+                          fit: videoFit,
+                        ),
+                      ),
+                      if (loadError != null)
+                        _buildErrorOverlay(
+                          renderRadius: renderRadius,
+                          loadError: loadError,
+                          isPlayerScreen: true,
+                          hasNext: hasNextTrack,
+                        ),
+                    ],
+                  ),
+                ),
+
+              Offstage(
+                key: const ValueKey('normal_layout'),
+                offstage: pipPresentation,
+                child: TickerMode(
+                  enabled: !pipPresentation,
+                  child: normalLayout,
+                ),
+              ),
+
+              // When NOT on PlayerScreen (e.g. Home screen), the video MUST be on top of normalLayout
+              // so the mini-player floats over the solid background of the Home screen.
+              if (!isPlayerScreen)
+                _PlaybackSurfaceLayer(
+                  key: const ValueKey('video_surface'),
+                  routeTransition: routeTransition,
+                  animatePlayerRoute: animatePlayerRoute,
+                  collapsedBounds: collapsedBounds,
+                  expandedBounds: expandedBounds,
+                  pipPresentation: pipPresentation,
+                  normalBounds: normalBounds,
+                  showShadow: showShadow,
+                  renderRadius: renderRadius,
+                  isWindows: isWindows,
+                  transparentBackground:
+                      playbackStatus.track?.isLocal == true &&
+                      !playbackStatus.hasVideo,
+                  child: Stack(
+                    children: [
+                      Offstage(
+                        offstage:
+                            playbackStatus.track?.isLocal == true &&
+                            !playbackStatus.hasVideo,
+                        child: _StablePlaybackView(
+                          controller: playbackEngine,
+                          status: playbackStatus,
+                          fit: videoFit,
+                        ),
+                      ),
+                      if (!pipPresentation && showVideo && hasVideoId)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            key: const ValueKey('video_thumbnail_open'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () async {
+                              await ref
+                                  .read(settingsProvider.notifier)
+                                  .setPlayerView(PlayerView.video);
+                              if (!context.mounted) return;
+                              final t = ref.read(playerProvider).currentTrack;
+                              final twitch = t == null ? null : twitchRouteFor(t);
+                              if (twitch != null) {
+                                context.push(twitch);
+                              } else if (t != null &&
+                                  t.spotifyId.startsWith('youtube:') &&
+                                  t.youtubeVideoId != null) {
+                                context.push('/watch?v=${t.youtubeVideoId}');
+                              } else {
+                                context.push('/player');
+                              }
+                            },
+                          ),
+                        ),
+                      if (loadError != null)
+                        _buildErrorOverlay(
+                          renderRadius: renderRadius,
+                          loadError: loadError,
+                          isPlayerScreen: false,
+                          hasNext: hasNextTrack,
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorOverlay({
+    required double renderRadius,
+    required String loadError,
+    required bool isPlayerScreen,
+    required bool hasNext,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final errLower = loadError.toLowerCase();
+
+    String title;
+    String? subtitle;
+    IconData iconData = Icons.error_outline_rounded;
+
+    if (errLower.contains('forbidden') || errLower.contains('403')) {
+      title = 'Access Forbidden (HTTP 403)';
+      subtitle =
+          'This stream is restricted or requires authentication credentials.';
+      iconData = Icons.lock_outline_rounded;
+    } else if (errLower.contains('not_found') ||
+        errLower.contains('404') ||
+        errLower.contains('not found')) {
+      title = 'Stream Not Found (HTTP 404)';
+      subtitle = 'The stream is no longer available at this address.';
+      iconData = Icons.link_off_rounded;
+    } else if (errLower.contains('timeout') ||
+        errLower.contains('unreachable') ||
+        errLower.contains('connection refused') ||
+        errLower.contains('no route')) {
+      title = 'Channel Offline';
+      subtitle = 'The stream server is currently unreachable or timed out.';
+      iconData = Icons.wifi_off_rounded;
+    } else if (errLower.contains('unsupported_format')) {
+      title = AppLocalizations.of(context)!.playbackErrorUnsupportedFormat;
+      subtitle =
+          'The media format or codec is not supported by the playback engine.';
+      iconData = Icons.video_file_outlined;
+    } else if (errLower.contains('file_inaccessible')) {
+      title = AppLocalizations.of(context)!.playbackErrorFileInaccessible;
+      subtitle = 'Unable to read or access the media stream source.';
+      iconData = Icons.folder_off_outlined;
+    } else if (errLower.contains('multiple attempts')) {
+      title = 'Connection Failed';
+      subtitle = 'Unable to establish a reliable connection to the stream.';
+      iconData = Icons.sync_problem_rounded;
+    } else {
+      title = 'Playback Failed';
+      subtitle = loadError.startsWith('error:')
+          ? loadError.substring(6)
+          : loadError;
+      iconData = Icons.error_outline_rounded;
+    }
+
+    return Positioned.fill(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(renderRadius),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            color: colorScheme.surface.withValues(alpha: 0.88),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isMini = constraints.maxHeight < 140;
+
+                if (isMini) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(iconData, color: colorScheme.error, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colorScheme.error,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TactileTap(
+                          onTap: () =>
+                              ref.read(playerProvider.notifier).retryLoad(),
+                          child: Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                        if (hasNext) ...[
+                          const SizedBox(width: 6),
+                          TactileTap(
+                            onTap: () =>
+                                ref.read(playerProvider.notifier).skipNext(),
+                            child: Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: colorScheme.surfaceContainerHighest,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.skip_next_rounded,
+                                color: colorScheme.onSurface,
+                                size: 16,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }
+
+                return Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 24,
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 58,
+                            height: 58,
+                            decoration: BoxDecoration(
+                              color: colorScheme.error.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              iconData,
+                              color: colorScheme.error,
+                              size: 32,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            title,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: colorScheme.onSurface,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          if (subtitle != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              subtitle,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 22),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 10,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              TactileTap(
+                                onTap: () => ref
+                                    .read(playerProvider.notifier)
+                                    .retryLoad(),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 22,
+                                    vertical: 11,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.primary,
+                                    borderRadius: BorderRadius.circular(22),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: colorScheme.primary.withValues(
+                                          alpha: 0.35,
+                                        ),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.refresh_rounded,
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        AppLocalizations.of(context)!.retry,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              if (hasNext)
+                                TactileTap(
+                                  onTap: () => ref
+                                      .read(playerProvider.notifier)
+                                      .skipNext(),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 22,
+                                      vertical: 11,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          colorScheme.surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(22),
+                                      border: Border.all(
+                                        color: colorScheme.outlineVariant
+                                            .withValues(alpha: 0.5),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.skip_next_rounded,
+                                          color: colorScheme.onSurface,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Next Channel',
+                                          style: TextStyle(
+                                            color: colorScheme.onSurface,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaybackSurfaceLayer extends StatefulWidget {
+  const _PlaybackSurfaceLayer({
+    super.key,
+    required this.routeTransition,
+    required this.animatePlayerRoute,
+    required this.collapsedBounds,
+    required this.expandedBounds,
+    required this.pipPresentation,
+    required this.normalBounds,
+    required this.showShadow,
+    required this.renderRadius,
+    required this.isWindows,
+    this.transparentBackground = false,
+    required this.child,
+  });
+
+  final PlayerRouteTransition routeTransition;
+  final bool animatePlayerRoute;
+  final Rect collapsedBounds;
+  final Rect expandedBounds;
+  final bool pipPresentation;
+  final Rect? normalBounds;
+  final bool showShadow;
+  final double renderRadius;
+  final bool isWindows;
+  final bool transparentBackground;
+  final Widget child;
+
+  @override
+  State<_PlaybackSurfaceLayer> createState() => _PlaybackSurfaceLayerState();
+}
+
+class _PlaybackSurfaceLayerState extends State<_PlaybackSurfaceLayer> {
+  double _lastFinalTop = 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    return AnimatedBuilder(
+      animation: widget.routeTransition,
+      builder: (context, _) {
+        final followsRoute =
+            widget.animatePlayerRoute && widget.routeTransition.isAttached;
+        final progress = widget.routeTransition.progress;
+        final radius = followsRoute
+            ? lerpDouble(12, 24, progress)!
+            : widget.renderRadius;
+        final bounds = followsRoute
+            ? Rect.lerp(
+                widget.collapsedBounds,
+                widget.expandedBounds,
+                progress,
+              )!
+            : widget.pipPresentation
+            ? Rect.fromLTWH(0, 0, screenSize.width, screenSize.height)
+            : (widget.normalBounds ?? Rect.zero);
+
+        final isHidingTransition =
+            (bounds.top == -9999.0 || _lastFinalTop == -9999.0);
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _lastFinalTop = bounds.top;
+          }
+        });
+
+        return AnimatedPositioned(
+          duration:
+              (followsRoute ||
+                  widget.pipPresentation ||
+                  (widget.isWindows && isHidingTransition))
+              ? Duration.zero
+              : const Duration(milliseconds: 250),
+          curve: Curves.easeOutQuart,
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.width,
+          height: bounds.height,
+          child: AnimatedContainer(
+            duration:
+                (followsRoute ||
+                    widget.pipPresentation ||
+                    (widget.isWindows && isHidingTransition))
+                ? Duration.zero
+                : const Duration(milliseconds: 250),
+            curve: Curves.easeOutQuart,
+            decoration: BoxDecoration(
+              color: widget.transparentBackground
+                  ? Colors.transparent
+                  : (widget.pipPresentation
+                        ? Colors.black
+                        : Theme.of(context).colorScheme.surface),
+              borderRadius: BorderRadius.circular(
+                widget.pipPresentation ? 0 : radius,
+              ),
+              boxShadow: [
+                if (widget.showShadow && !widget.pipPresentation)
+                  BoxShadow(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.scrim.withValues(alpha: 0.5),
+                    blurRadius: 15,
+                    offset: const Offset(0, 6),
+                  ),
+              ],
+            ),
+            clipBehavior: Clip.none,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(
+                widget.pipPresentation ? 0 : radius,
+              ),
+              child: widget.child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BottomNavBar extends StatelessWidget {
+  const _BottomNavBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final location = GoRouterState.of(context).uri.path;
+    final currentIndex = switch (location) {
+      String s when s.startsWith('/home') => 0,
+      String s when s.startsWith('/discover') => 1,
+      String s when s.startsWith('/search') => 2,
+      String s when s.startsWith('/library') => 3,
+      String s when s.startsWith('/shorts') => 4,
+      String s when s.startsWith('/downloads') => 5,
+      String s when s.startsWith('/subscriptions') => 6,
+      _ => -1,
+    };
+    // Phones are the YouTube client: Home is the video feed and Discover
+    // needs Spotify credentials, so those slots go to Subscriptions/Downloads.
+    final ultratube = isUltratubePlatform;
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: EdgeInsets.only(
+            top: 10,
+            bottom: MediaQuery.paddingOf(context).bottom + 6,
+          ),
+          decoration: BoxDecoration(
+            color: colorScheme.surface.withValues(alpha: 0.85),
+            border: Border(
+              top: BorderSide(
+                color: colorScheme.onSurface.withValues(alpha: 0.1),
+                width: 0.5,
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.scrim.withValues(alpha: 0.2),
+                blurRadius: 20,
+                offset: const Offset(0, -5),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _NavBarItem(
+                icon: Icons.home_outlined,
+                activeIcon: Icons.home,
+                label: AppLocalizations.of(context)!.home,
+                isSelected: currentIndex == 0,
+                onTap: () => context.go('/home'),
+              ),
+              if (!ultratube) ...[
+                _NavBarItem(
+                  icon: Icons.explore_outlined,
+                  activeIcon: Icons.explore,
+                  label: AppLocalizations.of(context)!.discover,
+                  isSelected: currentIndex == 1,
+                  onTap: () => context.go('/discover'),
+                ),
+                _NavBarItem(
+                  icon: Icons.search_outlined,
+                  activeIcon: Icons.search,
+                  label: AppLocalizations.of(context)!.search,
+                  isSelected: currentIndex == 2,
+                  onTap: () => context.go('/search'),
+                ),
+              ],
+              _NavBarItem(
+                icon: Icons.slow_motion_video,
+                activeIcon: Icons.slow_motion_video,
+                label: 'Shorts',
+                isSelected: currentIndex == 4,
+                onTap: () => context.go('/shorts'),
+              ),
+              if (ultratube)
+                _NavBarItem(
+                  icon: Icons.subscriptions_outlined,
+                  activeIcon: Icons.subscriptions,
+                  label: 'Inscrições',
+                  isSelected: currentIndex == 6,
+                  onTap: () => context.go('/subscriptions'),
+                ),
+              if (ultratube)
+                _NavBarItem(
+                  icon: Icons.download_outlined,
+                  activeIcon: Icons.download,
+                  label: 'Downloads',
+                  isSelected: currentIndex == 5,
+                  onTap: () => context.go('/downloads'),
+                ),
+              _NavBarItem(
+                icon: Icons.library_music_outlined,
+                activeIcon: Icons.library_music,
+                label: AppLocalizations.of(context)!.library,
+                isSelected: currentIndex == 3,
+                onTap: () => context.go('/library'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavBarItem extends StatelessWidget {
+  const _NavBarItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = isSelected
+        ? colorScheme.onSurface
+        : colorScheme.onSurface.withValues(alpha: 0.5);
+
+    return TactileTap(
+      onTap: onTap,
+      scaleDown: 0.85, // More pronounced tactile feedback for nav items
+      child: Container(
+        width: 80,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(isSelected ? activeIcon : icon, color: color, size: 26),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                letterSpacing: 0.2,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniPlayerBar extends ConsumerWidget {
+  const _MiniPlayerBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playerState = ref.watch(playerProvider);
+    final track = playerState.currentTrack;
+    final isLocalTrack = track?.sourceType == TrackSourceType.local;
+    final showVideo = ref.watch(settingsProvider.select((s) => s.showVideo));
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (track == null) return const SizedBox.shrink();
+
+    final progress = playerState.duration.inSeconds > 0
+        ? playerState.position.inSeconds / playerState.duration.inSeconds
+        : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+          child: ContentContextMenuRegion(
+            target: TrackContextTarget(track),
+            child: TactileTap(
+              onTap: () => track.spotifyId.startsWith('youtube:') &&
+                      track.youtubeVideoId != null
+                  ? context.push('/watch?v=${track.youtubeVideoId}')
+                  : queue_ui.openQueue(context, ref),
+              scaleDown: 0.98,
+              child: Container(
+                height: 64,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurface.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colorScheme.onSurface.withValues(alpha: 0.06),
+                    width: 0.5,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    // Progress Bar at the top edge
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        height: 1.5,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: colorScheme.onSurface.withValues(alpha: 0.1),
+                        ),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: progress.clamp(0.0, 1.0),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: colorScheme.primary.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Subtle Logo Watermark
+                    Positioned(
+                      right: -20,
+                      bottom: -15,
+                      child: Opacity(
+                        opacity: 0.05,
+                        child: Transform.rotate(
+                          angle: -0.2,
+                          child: Image.asset(
+                            'assets/logo.png',
+                            width: 100,
+                            height: 100,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: PPImage(
+                            imageUrl: track.albumImage ?? '',
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                            fallbackIcon: track.isVideoFile
+                                ? Icons.videocam_rounded
+                                : Icons.music_note_rounded,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                track.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              ArtistsLinks(
+                                track: track,
+                                style: TextStyle(
+                                  color: colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.6),
+                                  fontSize: 11,
+                                ),
+                              ),
+                              // "Playing on X" remote output indicator
+                              Builder(
+                                builder: (_) {
+                                  final outputState = ref.watch(
+                                    networkOutputSnapshotProvider,
+                                  );
+                                  if (!outputState.connected)
+                                    return const SizedBox.shrink();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.cast_connected,
+                                          size: 10,
+                                          color: colorScheme.primary,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            AppLocalizations.of(
+                                              context,
+                                            )!.playingOn(
+                                              outputState.selectedOutput.name,
+                                            ),
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: colorScheme.primary,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        TactileIconButton(
+                          icon: Icons.skip_previous,
+                          onTap: () =>
+                              ref.read(playerProvider.notifier).skipPrevious(),
+                          size: 24,
+                          hoverColor: colorScheme.primary,
+                          tooltip: AppLocalizations.of(context)!.previous,
+                        ),
+                        TactilePlayerPlayPauseButton(
+                          isPlaying: playerState.isPlaying,
+                          isLoading: playerState.isLoadingVideo,
+                          size: 34,
+                          onTap: () =>
+                              ref.read(playerProvider.notifier).togglePlay(),
+                          tooltip: playerState.isPlaying
+                              ? AppLocalizations.of(context)!.pause
+                              : AppLocalizations.of(context)!.play,
+                        ),
+                        TactileIconButton(
+                          icon: Icons.skip_next,
+                          onTap: () =>
+                              ref.read(playerProvider.notifier).skipNext(),
+                          size: 24,
+                          hoverColor: colorScheme.primary,
+                          tooltip: AppLocalizations.of(context)!.next,
+                        ),
+                        const SizedBox(width: 4),
+                        // Output / Cast icon in mini-player
+                        Builder(
+                          builder: (ctx) {
+                            final outputState = ref.watch(
+                              networkOutputSnapshotProvider,
+                            );
+                            return TactileIconButton(
+                              icon: outputState.connected
+                                  ? Icons.cast_connected
+                                  : Icons.cast,
+                              size: 18,
+                              color: outputState.connected
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurfaceVariant.withValues(
+                                      alpha: 0.5,
+                                    ),
+                              hoverColor: colorScheme.primary,
+                              tooltip: outputState.connected
+                                  ? AppLocalizations.of(context)!.playingOn(
+                                      outputState.selectedOutput.name,
+                                    )
+                                  : AppLocalizations.of(context)!.playOn,
+                              onTap: () => showOutputPicker(ctx, ref),
+                            );
+                          },
+                        ),
+                        if (isLocalTrack == false)
+                          TactileIconButton(
+                            icon: showVideo
+                                ? Icons.videocam
+                                : Icons.videocam_off,
+                            onTap: () => ref
+                                .read(settingsProvider.notifier)
+                                .toggleVideo(),
+                            size: 18,
+                            color: colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.6,
+                            ),
+                            hoverColor: colorScheme.onSurface,
+                            tooltip: showVideo
+                                ? AppLocalizations.of(context)!.hideVideo
+                                : AppLocalizations.of(context)!.showVideo,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QueueResizeDivider extends StatefulWidget {
+  const _QueueResizeDivider({required this.onResize, required this.onReset});
+
+  final ValueChanged<double> onResize;
+  final VoidCallback onReset;
+
+  @override
+  State<_QueueResizeDivider> createState() => _QueueResizeDividerState();
+}
+
+class _QueueResizeDividerState extends State<_QueueResizeDivider> {
+  bool _isHovered = false;
+  bool _isDragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final active = _isHovered || _isDragging;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeLeftRight,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onDoubleTap: widget.onReset,
+        onHorizontalDragStart: (_) => setState(() => _isDragging = true),
+        onHorizontalDragUpdate: (details) => widget.onResize(details.delta.dx),
+        onHorizontalDragEnd: (_) => setState(() => _isDragging = false),
+        onHorizontalDragCancel: () => setState(() => _isDragging = false),
+        child: Tooltip(
+          message: 'Drag to resize queue\nDouble-click to reset',
+          waitDuration: const Duration(milliseconds: 500),
+          child: Container(
+            width: 10,
+            color: Colors.transparent,
+            alignment: Alignment.center,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // 1px Vertical divider line
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 1,
+                  height: double.infinity,
+                  color: active
+                      ? colorScheme.primary.withValues(alpha: 0.6)
+                      : colorScheme.outlineVariant.withValues(alpha: 0.25),
+                ),
+                // Handle pill indicator
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: active ? 4 : 3,
+                  height: active ? 40 : 28,
+                  decoration: BoxDecoration(
+                    color: active
+                        ? colorScheme.primary
+                        : colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(2),
+                    boxShadow: active
+                        ? [
+                            BoxShadow(
+                              color: colorScheme.primary.withValues(
+                                alpha: 0.45,
+                              ),
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopSidebar extends ConsumerWidget {
+  const _DesktopSidebar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final location = GoRouterState.of(context).uri.path;
+    if (MediaQuery.sizeOf(context).width < 1000) {
+      return CompactDesktopNavigation(
+        location: location,
+        onNavigate: (path) => context.go(path),
+      );
+    }
+    final database = ref.watch(db.appDatabaseProvider);
+    final currentIndex = switch (location) {
+      String s when s.startsWith('/home') => 0,
+      String s when s.startsWith('/discover') => 1,
+      String s when s.startsWith('/search') => 2,
+      String s when s.startsWith('/library') => 3,
+      String s when s.startsWith('/shorts') => 4,
+      _ => -1,
+    };
+
+    return Container(
+      width: 240,
+      color: colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              children: [
+                Hero(
+                      tag: 'app_logo',
+                      child: Image.asset(
+                        'assets/logo.png',
+                        height: 28,
+                        color: colorScheme.primary,
+                      ),
+                    )
+                    .animate(
+                      onPlay: (controller) => controller.repeat(reverse: true),
+                    )
+                    .scale(
+                      begin: const Offset(1, 1),
+                      end: const Offset(1.1, 1.1),
+                      duration: 2000.ms,
+                      curve: Curves.easeInOut,
+                    ),
+                const SizedBox(width: 8),
+                Text(
+                  'Ultratube',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                _SidebarItem(
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
+                  label: AppLocalizations.of(context)!.home,
+                  isSelected: currentIndex == 0,
+                  onTap: () => context.go('/home'),
+                ),
+                _SidebarItem(
+                  icon: Icons.explore_outlined,
+                  activeIcon: Icons.explore,
+                  label: AppLocalizations.of(context)!.discover,
+                  isSelected: currentIndex == 1,
+                  onTap: () => context.go('/discover'),
+                ),
+                _SidebarItem(
+                  icon: Icons.search_outlined,
+                  activeIcon: Icons.search,
+                  label: AppLocalizations.of(context)!.search,
+                  isSelected: currentIndex == 2,
+                  onTap: () => context.go('/search'),
+                ),
+                _SidebarItem(
+                  icon: Icons.slow_motion_video,
+                  activeIcon: Icons.slow_motion_video,
+                  label: 'Shorts',
+                  isSelected: currentIndex == 4,
+                  onTap: () => context.go('/shorts'),
+                ),
+                _SidebarItem(
+                  icon: Icons.library_music_outlined,
+                  activeIcon: Icons.library_music,
+                  label: AppLocalizations.of(context)!.library,
+                  isSelected:
+                      currentIndex == 3 &&
+                      GoRouterState.of(context).uri.queryParameters['filter'] !=
+                          'playlists',
+                  onTap: () => context.go('/library'),
+                ),
+                const SizedBox(height: 32),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    AppLocalizations.of(context)!.yourMusic,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                      color: colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+                _SidebarItem(
+                  icon: Icons.favorite_border,
+                  activeIcon: Icons.favorite,
+                  label: AppLocalizations.of(context)!.favorites,
+                  isSelected: location.startsWith('/liked-songs'),
+                  onTap: () => context.push('/liked-songs'),
+                ),
+                _SidebarItem(
+                  icon: Icons.history,
+                  activeIcon: Icons.history,
+                  label: AppLocalizations.of(context)!.recentlyPlayed,
+                  isSelected: location.startsWith('/recently-played'),
+                  onTap: () => context.push('/recently-played'),
+                ),
+
+                const SizedBox(height: 32),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        AppLocalizations.of(context)!.filterPlaylists,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                          color: colorScheme.onSurface.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      TactileIconButton(
+                        icon: Icons.add_rounded,
+                        size: 18,
+                        padding: const EdgeInsets.all(4),
+                        color: colorScheme.onSurface.withValues(alpha: 0.6),
+                        hoverColor: colorScheme.primary,
+                        tooltip: AppLocalizations.of(context)!.newPlaylist,
+                        onTap: () async {
+                          final nameController = TextEditingController();
+                          await showPremiumModal(
+                            context: context,
+                            title: AppLocalizations.of(context)!.newPlaylist,
+                            child: Builder(
+                              builder: (modalContext) {
+                                final modalColors = Theme.of(
+                                  modalContext,
+                                ).colorScheme;
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    TextField(
+                                      controller: nameController,
+                                      autofocus: true,
+                                      style: TextStyle(
+                                        color: modalColors.onSurface,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText: AppLocalizations.of(
+                                          context,
+                                        )!.playlistName,
+                                        filled: true,
+                                        fillColor: modalColors
+                                            .surfaceContainerHighest
+                                            .withValues(alpha: 0.5),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 20),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.of(modalContext).pop(),
+                                          child: Text(
+                                            AppLocalizations.of(
+                                              context,
+                                            )!.cancel,
+                                            style: TextStyle(
+                                              color: modalColors.onSurface
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        TactileTap(
+                                          onTap: () async {
+                                            final name = nameController.text
+                                                .trim();
+                                            if (name.isNotEmpty) {
+                                              await database.createPlaylist(
+                                                name,
+                                              );
+                                              if (modalContext.mounted) {
+                                                Navigator.of(
+                                                  modalContext,
+                                                ).pop();
+                                              }
+                                            }
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 18,
+                                              vertical: 10,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: modalColors.primary,
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              AppLocalizations.of(
+                                                context,
+                                              )!.create,
+                                              style: TextStyle(
+                                                color: modalColors.onPrimary,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                StreamBuilder<List<db.Playlist>>(
+                  stream: database.watchPlaylists(),
+                  builder: (context, snap) {
+                    final playlists = snap.data ?? [];
+                    if (playlists.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 16,
+                        ),
+                        child: Text(
+                          AppLocalizations.of(context)!.noPlaylistsYet,
+                          style: TextStyle(
+                            color: colorScheme.onSurface.withValues(alpha: 0.3),
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    }
+                    return Column(
+                      children: playlists.map((p) {
+                        return ContentContextMenuRegion(
+                          target: PlaylistContextTarget(
+                            id: '${p.id}',
+                            name: p.name,
+                            imageUrl: p.imageUrl,
+                            isLocal: true,
+                            localId: p.id,
+                          ),
+                          child: _MockPlaylistItem(
+                            title: p.name,
+                            subtitle: AppLocalizations.of(context)!.playlist,
+                            isSelected: location == '/playlist/${p.id}',
+                            imageUrl:
+                                p.imageUrl ??
+                                'https://ui-avatars.com/api/?name=${Uri.encodeComponent(p.name)}&background=random',
+                            onTap: () {
+                              context.push('/playlist/${p.id}');
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarItem extends StatefulWidget {
+  const _SidebarItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  State<_SidebarItem> createState() => _SidebarItemState();
+}
+
+class _SidebarItemState extends State<_SidebarItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final iconColor = widget.isSelected
+        ? colorScheme.onPrimary
+        : (_isHovered
+              ? colorScheme.onSurface
+              : colorScheme.onSurface.withValues(alpha: 0.70));
+
+    final textColor = widget.isSelected
+        ? colorScheme.onPrimary
+        : (_isHovered
+              ? colorScheme.onSurface
+              : colorScheme.onSurface.withValues(alpha: 0.70));
+
+    final hoverBg = colorScheme.onSurface.withValues(alpha: 0.08);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              gradient: widget.isSelected
+                  ? LinearGradient(
+                      colors: [
+                        colorScheme.primary,
+                        colorScheme.primary.withValues(alpha: 0.80),
+                      ],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    )
+                  : null,
+              color: widget.isSelected
+                  ? null
+                  : (_isHovered ? hoverBg : Colors.transparent),
+              border: Border.all(
+                color: widget.isSelected
+                    ? Colors.transparent
+                    : (_isHovered
+                          ? colorScheme.outlineVariant.withValues(alpha: 0.18)
+                          : Colors.transparent),
+                width: 1.0,
+              ),
+              boxShadow: widget.isSelected
+                  ? [
+                      BoxShadow(
+                        color: colorScheme.primary.withValues(
+                          alpha: _isHovered ? 0.35 : 0.20,
+                        ),
+                        blurRadius: _isHovered ? 12 : 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              children: [
+                AnimatedScale(
+                  scale: _isHovered ? 1.08 : 1.0,
+                  duration: const Duration(milliseconds: 140),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    widget.isSelected ? widget.activeIcon : widget.icon,
+                    color: iconColor,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOutCubic,
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      fontWeight: (widget.isSelected || _isHovered)
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      letterSpacing: -0.2,
+                    ),
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MockPlaylistItem extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final String imageUrl;
+  final VoidCallback? onTap;
+  final bool isSelected;
+
+  const _MockPlaylistItem({
+    required this.title,
+    required this.subtitle,
+    required this.imageUrl,
+    this.isSelected = false,
+    this.onTap,
+  });
+
+  @override
+  State<_MockPlaylistItem> createState() => _MockPlaylistItemState();
+}
+
+class _MockPlaylistItemState extends State<_MockPlaylistItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap ?? () => context.go('/library'),
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: (_isHovered || widget.isSelected)
+                  ? colorScheme.onSurface.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              border: Border.all(
+                color: (_isHovered || widget.isSelected)
+                    ? colorScheme.outlineVariant.withValues(alpha: 0.16)
+                    : Colors.transparent,
+                width: 1.0,
+              ),
+            ),
+            child: Row(
+              children: [
+                AnimatedScale(
+                  scale: _isHovered ? 1.05 : 1.0,
+                  duration: const Duration(milliseconds: 140),
+                  curve: Curves.easeOutCubic,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: PPImage(
+                      imageUrl: widget.imageUrl,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: (_isHovered || widget.isSelected)
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color: (_isHovered || widget.isSelected)
+                              ? colorScheme.onSurface
+                              : colorScheme.onSurface.withValues(alpha: 0.9),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        widget.subtitle,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: (_isHovered || widget.isSelected)
+                              ? colorScheme.primary
+                              : colorScheme.onSurface.withValues(alpha: 0.5),
+                          fontWeight: (_isHovered || widget.isSelected)
+                              ? FontWeight.w500
+                              : FontWeight.normal,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class DesktopPlayerBar extends ConsumerWidget {
+  const DesktopPlayerBar({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playerState = ref.watch(playerProvider);
+    final playerNotifier = ref.read(playerProvider.notifier);
+    final track = playerState.currentTrack;
+    final isLocalTrack = track?.sourceType == TrackSourceType.local;
+    final showVideo = ref.watch(settingsProvider.select((s) => s.showVideo));
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final compact = MediaQuery.sizeOf(context).width < 1000;
+    final controlGap = compact ? 4.0 : 16.0;
+    Future<void> openQueue() async {
+      await queue_ui.openQueue(context, ref);
+    }
+
+    if (track == null) return const SizedBox.shrink();
+
+    final progress = playerState.duration.inSeconds > 0
+        ? playerState.position.inSeconds / playerState.duration.inSeconds
+        : 0.0;
+    final bufferedProgress = playerState.duration.inSeconds > 0
+        ? playerState.buffered.inSeconds / playerState.duration.inSeconds
+        : 0.0;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          height: 90,
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainer,
+            border: Border(
+              top: BorderSide(
+                color: colorScheme.onSurface.withValues(alpha: 0.15),
+                width: 0.5,
+              ),
+            ),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 16),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 24),
+                  child: Row(
+                    children: [
+                      // Left: Track Info
+                      Expanded(
+                        flex: 1,
+                        child: ContentContextMenuRegion(
+                          target: TrackContextTarget(track),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: PPImage(
+                                  imageUrl: track.albumImage ?? '',
+                                  width: compact ? 44 : 56,
+                                  height: compact ? 44 : 56,
+                                  fit: BoxFit.cover,
+                                  fallbackIcon: track.isVideoFile
+                                      ? Icons.videocam_rounded
+                                      : Icons.music_note_rounded,
+                                ),
+                              ),
+                              SizedBox(width: compact ? 8 : 16),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      track.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    ArtistsLinks(
+                                      track: track,
+                                      style: TextStyle(
+                                        color: colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.8),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Center: Controls
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (!compact)
+                            TactileIconButton(
+                              icon: Icons.shuffle,
+                              onTap: () => ref
+                                  .read(playerProvider.notifier)
+                                  .toggleShuffle(),
+                              size: 20,
+                              color: playerState.isShuffled
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurfaceVariant.withValues(
+                                      alpha: 0.7,
+                                    ),
+                              hoverColor: playerState.isShuffled
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurface,
+                              tooltip: AppLocalizations.of(context)!.shuffle,
+                            ),
+                          if (!compact) SizedBox(width: controlGap),
+                          TactileIconButton(
+                            icon: Icons.skip_previous,
+                            onTap: () => ref
+                                .read(playerProvider.notifier)
+                                .skipPrevious(),
+                            size: 28,
+                            color: colorScheme.onSurface.withValues(
+                              alpha: 0.85,
+                            ),
+                            hoverColor: colorScheme.primary,
+                            tooltip: AppLocalizations.of(context)!.previous,
+                          ),
+                          SizedBox(width: controlGap),
+                          TactilePlayerPlayPauseButton(
+                            isPlaying: playerState.isPlaying,
+                            isLoading: playerState.isLoadingVideo,
+                            size: 46,
+                            onTap: () =>
+                                ref.read(playerProvider.notifier).togglePlay(),
+                            tooltip: playerState.isPlaying
+                                ? AppLocalizations.of(context)!.pause
+                                : AppLocalizations.of(context)!.play,
+                          ),
+                          SizedBox(width: controlGap),
+                          TactileIconButton(
+                            icon: Icons.skip_next,
+                            onTap: () =>
+                                ref.read(playerProvider.notifier).skipNext(),
+                            size: 28,
+                            color: colorScheme.onSurface.withValues(
+                              alpha: 0.85,
+                            ),
+                            hoverColor: colorScheme.primary,
+                            tooltip: AppLocalizations.of(context)!.next,
+                          ),
+                          if (!compact) SizedBox(width: controlGap),
+                          if (!compact)
+                            TactileIconButton(
+                              icon: playerState.repeatMode == RepeatMode.one
+                                  ? Icons.repeat_one
+                                  : Icons.repeat,
+                              onTap: () => ref
+                                  .read(playerProvider.notifier)
+                                  .cycleRepeat(),
+                              size: 20,
+                              color: playerState.repeatMode != RepeatMode.none
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurfaceVariant.withValues(
+                                      alpha: 0.7,
+                                    ),
+                              hoverColor:
+                                  playerState.repeatMode != RepeatMode.none
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurface,
+                              tooltip: playerState.repeatMode == RepeatMode.one
+                                  ? '${AppLocalizations.of(context)!.repeat}: 1'
+                                  : (playerState.repeatMode == RepeatMode.all
+                                        ? '${AppLocalizations.of(context)!.repeat}: ${AppLocalizations.of(context)!.filterAll}'
+                                        : '${AppLocalizations.of(context)!.repeat}: ${AppLocalizations.of(context)!.off}'),
+                            ),
+                        ],
+                      ),
+
+                      // Right: Extra controls
+                      Expanded(
+                        flex: 1,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            // Volume control with mute toggle
+                            if (!compact)
+                              TactileIconButton(
+                                icon: playerState.volume == 0
+                                    ? Icons.volume_off
+                                    : (playerState.volume < 0.5
+                                          ? Icons.volume_down
+                                          : Icons.volume_up),
+                                size: 19,
+                                padding: const EdgeInsets.all(6),
+                                color: colorScheme.onSurfaceVariant.withValues(
+                                  alpha: 0.8,
+                                ),
+                                hoverColor: colorScheme.primary,
+                                tooltip: playerState.volume == 0
+                                    ? AppLocalizations.of(context)!.unmute
+                                    : AppLocalizations.of(context)!.mute,
+                                onTap: () {
+                                  final notifier = ref.read(
+                                    playerProvider.notifier,
+                                  );
+                                  if (playerState.volume > 0) {
+                                    notifier.setVolume(0);
+                                  } else {
+                                    notifier.setVolume(0.7);
+                                  }
+                                },
+                              ),
+                            if (!compact)
+                              Flexible(
+                                child: _DesktopVolumeSlider(
+                                  volume: playerState.volume,
+                                  onChanged: (val) => ref
+                                      .read(playerProvider.notifier)
+                                      .setVolume(val),
+                                ),
+                              ),
+                            const SizedBox(width: 8),
+                            Builder(
+                              builder: (ctx) {
+                                final outputState = ref.watch(
+                                  networkOutputSnapshotProvider,
+                                );
+                                return TactileIconButton(
+                                  icon: outputState.connected
+                                      ? Icons.cast_connected
+                                      : Icons.cast,
+                                  size: 20,
+                                  color: outputState.connected
+                                      ? colorScheme.primary
+                                      : colorScheme.onSurfaceVariant.withValues(
+                                          alpha: 0.7,
+                                        ),
+                                  hoverColor: colorScheme.primary,
+                                  tooltip: outputState.connected
+                                      ? AppLocalizations.of(context)!.playingOn(
+                                          outputState.selectedOutput.name,
+                                        )
+                                      : AppLocalizations.of(context)!.playOn,
+                                  onTap: () => showOutputPicker(ctx, ref),
+                                );
+                              },
+                            ),
+                            if (compact) ...[
+                              PopupMenuButton<String>(
+                                tooltip: AppLocalizations.of(
+                                  context,
+                                )!.morePlaybackControls,
+                                icon: const Icon(Icons.more_horiz, size: 20),
+                                onSelected: (action) {
+                                  final notifier = ref.read(
+                                    playerProvider.notifier,
+                                  );
+                                  switch (action) {
+                                    case 'shuffle':
+                                      notifier.toggleShuffle();
+                                    case 'repeat':
+                                      notifier.cycleRepeat();
+                                    case 'video':
+                                      ref
+                                          .read(settingsProvider.notifier)
+                                          .toggleVideo();
+                                    case 'mute':
+                                      notifier.setVolume(
+                                        playerState.volume > 0 ? 0 : 0.7,
+                                      );
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  PopupMenuItem(
+                                    value: 'shuffle',
+                                    child: Text(
+                                      playerState.isShuffled
+                                          ? '${AppLocalizations.of(context)!.shuffle}: ${AppLocalizations.of(context)!.enabled}'
+                                          : '${AppLocalizations.of(context)!.shuffle}: ${AppLocalizations.of(context)!.off}',
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'repeat',
+                                    child: Text(
+                                      '${AppLocalizations.of(context)!.repeat}: ${playerState.repeatMode == RepeatMode.one
+                                          ? '1'
+                                          : playerState.repeatMode == RepeatMode.all
+                                          ? AppLocalizations.of(context)!.filterAll
+                                          : AppLocalizations.of(context)!.off}',
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'mute',
+                                    child: Text(
+                                      playerState.volume == 0
+                                          ? AppLocalizations.of(context)!.unmute
+                                          : AppLocalizations.of(context)!.mute,
+                                    ),
+                                  ),
+                                  if (!isLocalTrack)
+                                    PopupMenuItem(
+                                      value: 'video',
+                                      child: Text(
+                                        showVideo
+                                            ? AppLocalizations.of(
+                                                context,
+                                              )!.hideVideo
+                                            : AppLocalizations.of(
+                                                context,
+                                              )!.showVideo,
+                                      ),
+                                    ),
+                                  PopupMenuItem<String>(
+                                    enabled: false,
+                                    child: SizedBox(
+                                      width: 180,
+                                      child: Consumer(
+                                        builder: (context, ref, _) => Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              AppLocalizations.of(
+                                                context,
+                                              )!.volume,
+                                            ),
+                                            Slider(
+                                              value: ref.watch(
+                                                playerProvider.select(
+                                                  (s) => s.volume,
+                                                ),
+                                              ),
+                                              onChanged: (value) => ref
+                                                  .read(playerProvider.notifier)
+                                                  .setVolume(value),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else if (isLocalTrack == false) ...[
+                              const SizedBox(width: 8),
+                              TactileIconButton(
+                                icon: showVideo
+                                    ? Icons.videocam
+                                    : Icons.videocam_off,
+                                onTap: () => ref
+                                    .read(settingsProvider.notifier)
+                                    .toggleVideo(),
+                                size: 20,
+                                color: showVideo
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurfaceVariant.withValues(
+                                        alpha: 0.7,
+                                      ),
+                                hoverColor: colorScheme.onSurface,
+                                tooltip: showVideo
+                                    ? AppLocalizations.of(context)!.hideVideo
+                                    : AppLocalizations.of(context)!.showVideo,
+                              ),
+                            ],
+                            SizedBox(width: compact ? 4 : 16),
+                            if (compact)
+                              Tooltip(
+                                message: AppLocalizations.of(
+                                  context,
+                                )!.queueTooltip,
+                                child: SizedBox(
+                                  width: 96,
+                                  child: OutlinedButton.icon(
+                                    onPressed: openQueue,
+                                    icon: const Icon(
+                                      Icons.queue_music,
+                                      size: 18,
+                                    ),
+                                    label: Text(
+                                      AppLocalizations.of(
+                                        context,
+                                      )!.queueTooltip,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              TactileIconButton(
+                                icon: Icons.queue_music,
+                                onTap: openQueue,
+                                size: 20,
+                                color: colorScheme.onSurfaceVariant.withValues(
+                                  alpha: 0.7,
+                                ),
+                                hoverColor: colorScheme.primary,
+                                tooltip: AppLocalizations.of(
+                                  context,
+                                )!.queueTooltip,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: _DesktopProgressBar(
+            progress: progress,
+            bufferedProgress: bufferedProgress,
+            duration: playerState.duration,
+            isDailymotion:
+                playerNotifier.currentPlaybackTrack?.networkMediaUri?.contains(
+                      'dailymotion.com',
+                    ) ==
+                    true ||
+                playerNotifier.currentPlaybackTrack?.networkMediaUri?.contains(
+                      'dmcdn.net',
+                    ) ==
+                    true,
+            onSeek: (pos) => ref.read(playerProvider.notifier).seekTo(pos),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DesktopProgressBar extends StatefulWidget {
+  final double progress;
+  final double bufferedProgress;
+  final Duration duration;
+  final ValueChanged<Duration> onSeek;
+  final bool isDailymotion;
+
+  const _DesktopProgressBar({
+    required this.progress,
+    required this.bufferedProgress,
+    required this.duration,
+    required this.onSeek,
+    this.isDailymotion = false,
+  });
+
+  @override
+  State<_DesktopProgressBar> createState() => _DesktopProgressBarState();
+}
+
+class _DesktopProgressBarState extends State<_DesktopProgressBar> {
+  bool _isHovered = false;
+  double? _dragProgress;
+  double _hoverProgress = 0.0;
+  final OverlayPortalController _tooltipController = OverlayPortalController();
+  final LayerLink _layerLink = LayerLink();
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes;
+    final seconds = d.inSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  void _handleSeek(Offset localPosition, double totalWidth) {
+    if (totalWidth <= 0 || widget.duration.inMilliseconds <= 0) return;
+    double ratio = (localPosition.dx / totalWidth).clamp(0.0, 1.0);
+    if (widget.isDailymotion) {
+      final safeBufferMs =
+          (widget.duration.inMilliseconds * widget.bufferedProgress) - 3000;
+      final maxRatio = safeBufferMs > 0
+          ? safeBufferMs / widget.duration.inMilliseconds
+          : 0.0;
+      if (ratio > maxRatio) {
+        ratio = maxRatio;
+      }
+    }
+    setState(() {
+      _dragProgress = ratio;
+    });
+  }
+
+  void _commitSeek() {
+    if (_dragProgress != null && widget.duration.inMilliseconds > 0) {
+      final targetMs = (widget.duration.inMilliseconds * _dragProgress!)
+          .round();
+      widget.onSeek(Duration(milliseconds: targetMs));
+      setState(() {
+        _dragProgress = null;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final currentProgress = (_dragProgress ?? widget.progress).clamp(0.0, 1.0);
+    final hoverOrDragProgress = (_dragProgress ?? _hoverProgress).clamp(
+      0.0,
+      1.0,
+    );
+    final hoverDuration = Duration(
+      milliseconds: (widget.duration.inMilliseconds * hoverOrDragProgress)
+          .round(),
+    );
+    final isActive = _isHovered || _dragProgress != null;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (isActive) {
+        if (!_tooltipController.isShowing) _tooltipController.show();
+      } else {
+        if (_tooltipController.isShowing) _tooltipController.hide();
+      }
+    });
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _isHovered = true),
+          onExit: (_) => setState(() => _isHovered = false),
+          onHover: (details) {
+            if (constraints.maxWidth > 0) {
+              setState(() {
+                double hoverRatio =
+                    (details.localPosition.dx / constraints.maxWidth).clamp(
+                      0.0,
+                      1.0,
+                    );
+                if (widget.isDailymotion &&
+                    hoverRatio > widget.bufferedProgress) {
+                  hoverRatio = widget.bufferedProgress;
+                }
+                _hoverProgress = hoverRatio;
+              });
+            }
+          },
+          child: OverlayPortal(
+            controller: _tooltipController,
+            overlayChildBuilder: (context) {
+              final tooltipX =
+                  (constraints.maxWidth * hoverOrDragProgress).clamp(
+                    16.0,
+                    constraints.maxWidth - 32.0,
+                  ) -
+                  16.0;
+
+              return Positioned(
+                top: 0,
+                left: 0,
+                child: CompositedTransformFollower(
+                  link: _layerLink,
+                  showWhenUnlinked: false,
+                  offset: Offset(tooltipX, -28.0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(4),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      _formatDuration(hoverDuration),
+                      style: TextStyle(
+                        color: colorScheme.onSurface,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+            child: CompositedTransformTarget(
+              link: _layerLink,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (details) =>
+                    _handleSeek(details.localPosition, constraints.maxWidth),
+                onTapUp: (details) => _commitSeek(),
+                onTapCancel: () => setState(() => _dragProgress = null),
+                onHorizontalDragStart: (details) =>
+                    _handleSeek(details.localPosition, constraints.maxWidth),
+                onHorizontalDragUpdate: (details) =>
+                    _handleSeek(details.localPosition, constraints.maxWidth),
+                onHorizontalDragEnd: (details) => _commitSeek(),
+                onHorizontalDragCancel: () =>
+                    setState(() => _dragProgress = null),
+                child: Container(
+                  height: 16.0, // Larger hit area
+                  width: double.infinity,
+                  alignment: Alignment.center,
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    clipBehavior: Clip.none,
+                    children: [
+                      // Background track
+                      Container(
+                        height: isActive ? 4.5 : 2.5,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: colorScheme.onSurface.withValues(
+                            alpha: isActive ? 0.18 : 0.10,
+                          ),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                      // Buffered track
+                      FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: widget.bufferedProgress.clamp(0.0, 1.0),
+                        child: Container(
+                          height: isActive ? 4.5 : 2.5,
+                          decoration: BoxDecoration(
+                            color: colorScheme.onSurface.withValues(
+                              alpha: 0.40,
+                            ),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                      // Active progress track
+                      FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: currentProgress,
+                        child: Container(
+                          height: isActive ? 4.5 : 2.5,
+                          decoration: BoxDecoration(
+                            color: colorScheme.primary,
+                            borderRadius: BorderRadius.circular(4),
+                            boxShadow: isActive
+                                ? [
+                                    BoxShadow(
+                                      color: colorScheme.primary.withValues(
+                                        alpha: 0.45,
+                                      ),
+                                      blurRadius: 6,
+                                      spreadRadius: 1,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                        ),
+                      ),
+                      // Thumb
+                      if (isActive)
+                        Positioned(
+                          left: (constraints.maxWidth * currentProgress).clamp(
+                            0.0,
+                            constraints.maxWidth - 12.0,
+                          ),
+                          child: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.3),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DesktopVolumeSlider extends StatefulWidget {
+  final double volume;
+  final ValueChanged<double> onChanged;
+
+  const _DesktopVolumeSlider({required this.volume, required this.onChanged});
+
+  @override
+  State<_DesktopVolumeSlider> createState() => _DesktopVolumeSliderState();
+}
+
+class _DesktopVolumeSliderState extends State<_DesktopVolumeSlider> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 86),
+        child: SliderTheme(
+          data: SliderThemeData(
+            trackHeight: _isHovered ? 4.5 : 3.0,
+            thumbShape: RoundSliderThumbShape(
+              enabledThumbRadius: _isHovered ? 6.5 : 4.5,
+              elevation: _isHovered ? 2.0 : 0.0,
+            ),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            activeTrackColor: _isHovered
+                ? colorScheme.primary
+                : colorScheme.primary.withValues(alpha: 0.85),
+            inactiveTrackColor: colorScheme.onSurface.withValues(
+              alpha: _isHovered ? 0.25 : 0.15,
+            ),
+            thumbColor: colorScheme.primary,
+            overlayColor: colorScheme.primary.withValues(alpha: 0.15),
+          ),
+          child: Slider(
+            value: widget.volume,
+            min: 0.0,
+            max: 1.0,
+            onChanged: widget.onChanged,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopTopBar extends ConsumerStatefulWidget {
+  const _DesktopTopBar();
+
+  @override
+  ConsumerState<_DesktopTopBar> createState() => _DesktopTopBarState();
+}
+
+class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
+  late final TextEditingController _ctrl;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: ref.read(searchQueryProvider));
+    _focusNode = FocusNode();
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (_focusNode.hasFocus) {
+      final path = GoRouterState.of(context).uri.path;
+      if (path != '/search') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) context.go('/search');
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Keep controller in sync if provider changes from elsewhere
+    ref.listen<String>(searchQueryProvider, (prev, next) {
+      if (_ctrl.text != next) {
+        _ctrl.text = next;
+        _ctrl.selection = TextSelection.fromPosition(
+          TextPosition(offset: next.length),
+        );
+      }
+    });
+
+    final settings = ref.watch(settingsProvider);
+    final colorScheme = Theme.of(context).colorScheme;
+    final compact = MediaQuery.sizeOf(context).width < 1000;
+    return Container(
+      height: 80,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 32),
+      child: Row(
+        children: [
+          // Search Bar
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 540),
+                child: SharedSearchInput(
+                  controller: _ctrl,
+                  focusNode: _focusNode,
+                ),
+              ),
+            ),
+          ),
+
+          // Action Buttons
+          TactileIconButton(
+            icon: Icons.history,
+            onTap: () => context.push('/recently-played'),
+            size: 24,
+            color: colorScheme.onSurface.withValues(alpha: 0.7),
+          ),
+          SizedBox(width: compact ? 8 : 16),
+          TactileIconButton(
+            icon: Icons.settings_outlined,
+            onTap: () => context.push('/settings'),
+            size: 24,
+            color: colorScheme.onSurface.withValues(alpha: 0.7),
+          ),
+          SizedBox(width: compact ? 8 : 16),
+          // Profile Avatar
+          if (settings.userName.isNotEmpty)
+            TactileTap(
+              onTap: () => showEditProfileModal(context, ref),
+              child: Hero(
+                tag: 'settings_hero',
+                child: UserAvatarWidget(
+                  settings: settings,
+                  size: 32,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MeshPainter extends CustomPainter {
+  final Color primaryColor;
+  _MeshPainter({required this.primaryColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 50);
+
+    // Primary Brand Blob
+    paint.color = primaryColor.withValues(alpha: 0.15);
+    canvas.drawCircle(Offset(size.width * 0.8, size.height * 0.2), 120, paint);
+
+    // Dynamic Secondary Blob (derived from theme)
+    final secondaryColor =
+        Color.lerp(primaryColor, primaryColor.withValues(alpha: 0.8), 0.2) ??
+        primaryColor;
+    paint.color = secondaryColor.withValues(alpha: 0.1);
+    canvas.drawCircle(Offset(size.width * 0.2, size.height * 0.8), 90, paint);
+
+    // Dynamic Tertiary Blob (derived from theme)
+    final tertiaryColor =
+        Color.lerp(primaryColor, primaryColor.withValues(alpha: 0.6), 0.2) ??
+        primaryColor;
+    paint.color = tertiaryColor.withValues(alpha: 0.08);
+    canvas.drawCircle(Offset(size.width * 0.5, size.height * 0.5), 100, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MeshPainter oldDelegate) =>
+      oldDelegate.primaryColor != primaryColor;
+}
+
+/// A stable wrapper around [PlaybackView] that survives parent rebuilds.
+///
+/// When [ScaffoldWithNav] rebuilds due to [isPipMode] changing, a normal
+/// stateless child would be remounted — recreating [YoutubePlayer] and
+/// calling [init()] again, which resets the video to paused.
+///
+/// This widget uses [AutomaticKeepAliveClientMixin] to keep its state alive
+/// across parent rebuilds, preventing [YoutubePlayer] from being remounted.
+class _StablePlaybackView extends StatefulWidget {
+  final PlaybackController controller;
+  final PlaybackStatus status;
+  final BoxFit fit;
+
+  const _StablePlaybackView({
+    required this.controller,
+    required this.status,
+    required this.fit,
+  });
+
+  @override
+  State<_StablePlaybackView> createState() => _StablePlaybackViewState();
+}
+
+class _StablePlaybackViewState extends State<_StablePlaybackView>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // required for AutomaticKeepAliveClientMixin
+    return Consumer(
+      builder: (context, ref, child) {
+        final settings = ref.watch(settingsProvider);
+        return RepaintBoundary(
+          child: PlaybackView(
+            controller: widget.controller,
+            status: widget.status,
+            fit: widget.fit,
+            subtitleViewConfiguration: mk.SubtitleViewConfiguration(
+              style: TextStyle(
+                fontSize: settings.subtitleTextSize,
+                color: Colors.white,
+                backgroundColor: Color(settings.subtitleBackgroundColor),
+              ),
+              padding: const EdgeInsets.all(24),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

@@ -1,0 +1,21 @@
+# Não versionar: referência antiga, APKs gerados, builds e chaves
+/reference-zenith/
+/artifacts/
+/ppplayer/scratch/
+crash.ips
+**/build/
+**/.gradle/
+**/.kotlin/
+**/.dart_tool/
+**/.cxx/
+local.properties
+key.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+*.ipa
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

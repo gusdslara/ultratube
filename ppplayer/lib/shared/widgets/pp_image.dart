@@ -1,0 +1,147 @@
+import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import '../../core/cache/image_cache_manager.dart';
+
+class PPImage extends StatelessWidget {
+  final String? imageUrl;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final ImageRepeat repeat;
+  final Color? color;
+  final Widget? placeholder;
+  final Widget? errorWidget;
+  final BorderRadius? borderRadius;
+  final IconData? fallbackIcon;
+
+  const PPImage({
+    super.key,
+    required this.imageUrl,
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+    this.repeat = ImageRepeat.noRepeat,
+    this.color,
+    this.placeholder,
+    this.errorWidget,
+    this.borderRadius,
+    this.fallbackIcon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (imageUrl == null || imageUrl!.isEmpty) {
+      final fallback = errorWidget ?? _buildErrorWidget(context);
+      if (borderRadius != null) {
+        return ClipRRect(borderRadius: borderRadius!, child: fallback);
+      }
+      return fallback;
+    }
+
+    Widget image;
+    if (imageUrl!.startsWith('asset:')) {
+      final assetPath = imageUrl!.substring(6); // Remove 'asset:'
+      image = Image.asset(
+        assetPath,
+        width: width,
+        height: height,
+        fit: fit,
+        repeat: repeat,
+        color: color,
+        errorBuilder: (context, error, stackTrace) =>
+            errorWidget ?? _buildErrorWidget(context),
+      );
+    } else if (imageUrl!.startsWith('/') || imageUrl!.startsWith('file://')) {
+      final path = imageUrl!.startsWith('file://')
+          ? Uri.parse(imageUrl!).toFilePath()
+          : imageUrl!;
+      image = Image.file(
+        File(path),
+        width: width,
+        height: height,
+        fit: fit,
+        repeat: repeat,
+        color: color,
+        errorBuilder: (context, error, stackTrace) =>
+            errorWidget ?? _buildErrorWidget(context),
+      );
+    } else if (_isHttp(imageUrl!)) {
+      image = CachedNetworkImage(
+        cacheManager: PPImageCacheManager.instance,
+        imageUrl: imageUrl!,
+        width: width,
+        height: height,
+        fit: fit,
+        repeat: repeat,
+        color: color,
+        placeholder: (context, url) =>
+            placeholder ?? _buildPlaceholder(context),
+        errorWidget: (context, url, error) =>
+            errorWidget ?? _buildErrorWidget(context),
+      );
+    } else {
+      image = errorWidget ?? _buildErrorWidget(context);
+    }
+
+    if (borderRadius != null) {
+      return ClipRRect(borderRadius: borderRadius!, child: image);
+    }
+
+    return image;
+  }
+
+  Widget _buildPlaceholder(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      color: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.1),
+    );
+  }
+
+  Widget _buildErrorWidget(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      color: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.1),
+      child: Icon(
+        fallbackIcon ?? Icons.music_note_rounded,
+        color: Theme.of(
+          context,
+        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+      ),
+    );
+  }
+
+  static ImageProvider getImageProvider(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return const AssetImage('assets/logo.png');
+    }
+
+    if (imageUrl.startsWith('asset:')) {
+      return AssetImage(imageUrl.substring(6));
+    } else if (imageUrl.startsWith('/') || imageUrl.startsWith('file://')) {
+      final path = imageUrl.startsWith('file://')
+          ? Uri.parse(imageUrl).toFilePath()
+          : imageUrl;
+      return FileImage(File(path));
+    } else if (_isHttp(imageUrl)) {
+      return CachedNetworkImageProvider(
+        imageUrl,
+        cacheManager: PPImageCacheManager.instance,
+      );
+    }
+    return const AssetImage('assets/logo.png');
+  }
+
+  static bool _isHttp(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null &&
+        {'http', 'https'}.contains(uri.scheme) &&
+        uri.host.isNotEmpty;
+  }
+}

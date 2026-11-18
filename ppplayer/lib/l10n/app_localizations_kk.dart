@@ -1,0 +1,1165 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Kazakh (`kk`).
+class AppLocalizationsKk extends AppLocalizations {
+  AppLocalizationsKk([String locale = 'kk']) : super(locale);
+
+  @override
+  String get appTitle => 'PPPlayer';
+
+  @override
+  String titleSubtitle(Object title, Object subtitle) {
+    return '$title, $subtitle';
+  }
+
+  @override
+  String get albums => 'АЛЬБОМДАР';
+
+  @override
+  String get api => 'API';
+
+  @override
+  String get artists => 'ӘРТІСТЕР';
+
+  @override
+  String get artwork => 'МҰҚАБА';
+
+  @override
+  String get appVersion => 'Қолданба нұсқасы';
+
+  @override
+  String get artist => 'Әртіс';
+
+  @override
+  String get artistsYouFollow => 'Сіз жазылған әртістер';
+
+  @override
+  String get autoplay => 'Автоматты түрде ойнату';
+
+  @override
+  String get becauseYouListenedTo => 'Сіз тыңдағандықтан';
+
+  @override
+  String get browseAll => 'Барлығын шолу';
+
+  @override
+  String get cancel => 'Бас тарту';
+
+  @override
+  String get clearAppCache => 'Қолданба кэшін тазалау керек пе?';
+
+  @override
+  String get clearCache => 'Кэшті тазалау';
+
+  @override
+  String get clearHistory => 'Тарихты тазалау керек пе?';
+
+  @override
+  String get clearRecentlyPlayed => 'Жақында ойнатылғандарды тазалау';
+
+  @override
+  String get contentMarket => 'Мазмұн нарығы';
+
+  @override
+  String get continueListening => 'Тыңдауды жалғастыру';
+
+  @override
+  String get continueVideoPlaybackInASmallWindow =>
+      'Шағын терезеде бейне ойнатуды жалғастыру';
+
+  @override
+  String get create => 'Жасау';
+
+  @override
+  String get createAPlaylistToGetStarted =>
+      'Бастау үшін ойнату тізімін жасаңыз';
+
+  @override
+  String currentSelectedcountry(Object country) {
+    return 'Ағымдағы: $country';
+  }
+
+  @override
+  String get deletePlaylist => 'Ойнату тізімін жою';
+
+  @override
+  String get editProfile => 'Профильді өңдеу';
+
+  @override
+  String errorLoadingMarkets(Object err) {
+    return 'Нарықтарды жүктеу қатесі: $err';
+  }
+
+  @override
+  String error(Object error) {
+    return 'Қате: $error';
+  }
+
+  @override
+  String explore(Object genre) {
+    return '$genre жанрын зерттеу';
+  }
+
+  @override
+  String get fansAlsoLike => 'ЖАНКҮЙЕРЛЕРГЕ ДЕ ҰНАЙДЫ';
+
+  @override
+  String featuringTouppercase(Object artist) {
+    return '$artist ҚАТЫСУЫМЕН';
+  }
+
+  @override
+  String get featuredPlaylists => 'Таңдаулы ойнату тізімдері';
+
+  @override
+  String get followArtistsToSeeThemHere =>
+      'Оларды осында көру үшін әртістерге жазылыңыз';
+
+  @override
+  String get followStationsToSeeThemHere =>
+      'Оларды осында көру үшін станцияларға жазылыңыз';
+
+  @override
+  String get forceAudioonlyStreamsToSaveData =>
+      'Деректерді үнемдеу үшін тек аудио ағындарды мәжбүрлеу';
+
+  @override
+  String get freesUpSpaceAndForcesFreshDataOnNextLoad =>
+      'Орынды босатады және келесі жүктеу кезінде жаңа деректерді мәжбүрлейді';
+
+  @override
+  String get fromYourFavorites => 'Таңдаулыларыңыздан';
+
+  @override
+  String get goBack => 'Артқа қайту';
+
+  @override
+  String inspiredByName(Object name) {
+    return '$name шабыттандырған';
+  }
+
+  @override
+  String get keepPlayingSimilarTracksWhenQueueEnds =>
+      'Кезек аяқталған кезде ұқсас тректерді ойнатуды жалғастыру';
+
+  @override
+  String get library => 'Кітапхана';
+
+  @override
+  String get likeAlbumsToSeeThemHere =>
+      'Оларды осында көру үшін альбомдарға ұнату қойыңыз';
+
+  @override
+  String get likedSongs => 'Ұнаған өлеңдер';
+
+  @override
+  String get lowDataMode => 'Төмен деректер режимі';
+
+  @override
+  String get madeForYou => 'Сіз үшін жасалған';
+
+  @override
+  String moreLikeName(Object name) {
+    return '$name сияқты көбірек';
+  }
+
+  @override
+  String get moreOptions => 'Қосымша опциялар';
+
+  @override
+  String get nameYourMasterpiece => 'Жауһарыңызды атаңыз...';
+
+  @override
+  String get newPlaylist => 'Жаңа ойнату тізімі';
+
+  @override
+  String get newReleases => 'Жаңа шығарылымдар';
+
+  @override
+  String get next => 'Келесі';
+
+  @override
+  String get noAlbumsFound => 'Альбомдар табылмады';
+
+  @override
+  String get noArtistsFollowed => 'Жазылған әртістер жоқ';
+
+  @override
+  String get noArtistsFound => 'Әртістер табылмады';
+
+  @override
+  String get noLikedAlbums => 'Ұнаған альбомдар жоқ';
+
+  @override
+  String get noPlaylistsFound => 'Ойнату тізімдері табылмады';
+
+  @override
+  String get noPlaylistsYet => 'Әзірге ойнату тізімдері жоқ';
+
+  @override
+  String get noResultsFound => 'Нәтижелер табылмады';
+
+  @override
+  String get noStationsFollowed => 'Жазылған станциялар жоқ';
+
+  @override
+  String get noTrackPlaying => 'Ешқандай трек ойнатылып тұрған жоқ';
+
+  @override
+  String get noTracksFound => 'Тректер табылмады';
+
+  @override
+  String get playlists => 'ОЙНАТУ ТІЗІМДЕРІ';
+
+  @override
+  String get popular => 'ТАНЫМАЛ';
+
+  @override
+  String get permanentlyRemoveListeningHistory => 'Тыңдау тарихын біржола жою';
+
+  @override
+  String get pictureinpicturePip => 'Сурет ішіндегі сурет (PiP)';
+
+  @override
+  String get popularAlbums => 'Танымал альбомдар';
+
+  @override
+  String get popularArtists => 'Танымал әртістер';
+
+  @override
+  String get popularGenres => 'Танымал жанрлар';
+
+  @override
+  String get popularSongs => 'Танымал өлеңдер';
+
+  @override
+  String get popularTracks => 'Танымал тректер';
+
+  @override
+  String get popularHitsRightNow => 'Қазіргі танымал хиттер';
+
+  @override
+  String get previous => 'Алдыңғы';
+
+  @override
+  String get queue => 'КЕЗЕК';
+
+  @override
+  String get recentSearches => 'Соңғы іздеулер';
+
+  @override
+  String get recommendedForYou => 'Сізге ұсынылған';
+
+  @override
+  String get scraping => 'Қырнау';
+
+  @override
+  String get search => 'Іздеу';
+
+  @override
+  String get searchInAlbum => 'Альбомнан іздеу...';
+
+  @override
+  String get searchInLibrary => 'Кітапханадан іздеу...';
+
+  @override
+  String get searchInPlaylist => 'Ойнату тізімінен іздеу';
+
+  @override
+  String get searchLikedSongs => 'Ұнаған өлеңдерден іздеу...';
+
+  @override
+  String get searchPopularSongs => 'Танымал өлеңдерден іздеу...';
+
+  @override
+  String get selectMarket => 'Нарықты таңдау';
+
+  @override
+  String get settings => 'Параметрлер';
+
+  @override
+  String get showVideoPlayer => 'Бейне ойнатқышты көрсету';
+
+  @override
+  String get shuffle => 'Араластыру';
+
+  @override
+  String get spotifyCredentials => 'Spotify тіркелгі деректері';
+
+  @override
+  String get suggestedStations => 'Ұсынылған станциялар';
+
+  @override
+  String get tracks => 'ТРЕКТЕР';
+
+  @override
+  String get trending => 'Трендте';
+
+  @override
+  String get tryAgain => 'Қайта көріңіз';
+
+  @override
+  String get tryADifferentSearchTerm => 'Басқа іздеу терминін байқап көріңіз';
+
+  @override
+  String get useYoutubePlayerWhenAvailable =>
+      'Қолжетімді болған кезде YouTube ойнатқышын пайдалану';
+
+  @override
+  String get video => 'БЕЙНЕ';
+
+  @override
+  String get whatDoYouWantToListenTo => 'Не тыңдағыңыз келеді?';
+
+  @override
+  String get youtubeCredentials => 'YouTube тіркелгі деректері';
+
+  @override
+  String get yourLibrary => 'Сіздің кітапханаңыз';
+
+  @override
+  String get playerscreenviewswitch => 'ойыншы_экраны_көрінісін_ауыстыру';
+
+  @override
+  String get addToPlaylist => 'Ойнату тізіміне қосу';
+
+  @override
+  String get addToQueue => 'Кезекке қосу';
+
+  @override
+  String get copyId => 'ID көшіру';
+
+  @override
+  String get copyLink => 'Сілтемені көшіру';
+
+  @override
+  String get copySpotifyLink => 'Spotify сілтемесін көшіру';
+
+  @override
+  String get copyYouTubeLink => 'YouTube сілтемесін көшіру';
+
+  @override
+  String get copySpotifyId => 'Spotify ID көшіру';
+
+  @override
+  String get copyYouTubeId => 'YouTube ID көшіру';
+
+  @override
+  String get idCopied => 'ID көшірілді';
+
+  @override
+  String get discover => 'Ашу';
+
+  @override
+  String get enterYourName => 'Атыңызды енгізіңіз';
+
+  @override
+  String get favorites => 'Таңдаулылар';
+
+  @override
+  String get goToAlbum => 'Альбомға өту';
+
+  @override
+  String get goToArtist => 'Әртіске өту';
+
+  @override
+  String get goToArtistRadio => 'Әртіс радиосына өту';
+
+  @override
+  String get goToPlaylist => 'Ойнату тізіміне өту';
+
+  @override
+  String get goToSongRadio => 'Өлең радиосына өту';
+
+  @override
+  String get home => 'Басты бет';
+
+  @override
+  String get myAwesomePlaylist => 'Менің керемет ойнату тізімім';
+
+  @override
+  String get myPlaylist => 'Менің ойнату тізімім';
+
+  @override
+  String get newPlaylist1 => 'Жаңа ойнату тізімі';
+
+  @override
+  String get play => 'Ойнату';
+
+  @override
+  String get playStation => 'Станцияны ойнату';
+
+  @override
+  String get playNext => 'Келесіні ойнату';
+
+  @override
+  String get playlist => 'Ойнату тізімі';
+
+  @override
+  String get playlistName => 'Ойнату тізімінің атауы';
+
+  @override
+  String get playlists1 => 'Ойнату тізімдері';
+
+  @override
+  String get queue1 => 'Кезек';
+
+  @override
+  String get queueNowPlaying => 'Қазір ойналуда';
+
+  @override
+  String get queueUpNext => 'Келесі';
+
+  @override
+  String get recentlyPlayed => 'Жақында ойнатылған';
+
+  @override
+  String get removeFromQueue => 'Кезектен өшіру';
+
+  @override
+  String get retry => 'Қайталау';
+
+  @override
+  String get searchMusicArtistsAlbums => 'Музыка, әртістер, альбомдар іздеу...';
+
+  @override
+  String get share => 'Бөлісу';
+
+  @override
+  String featuringArtist(String artistName) {
+    return '$artistName ҚАТЫСУЫМЕН';
+  }
+
+  @override
+  String currentCountry(String country) {
+    return 'Ағымдағы: $country';
+  }
+
+  @override
+  String get queueTooltip => 'Кезек';
+
+  @override
+  String get searchHint => 'Музыка, әртістер, альбомдар іздеу...';
+
+  @override
+  String get language => 'Тіл';
+
+  @override
+  String get systemDefault => 'Жүйелік әдепкі';
+
+  @override
+  String get songsTab => 'Өлеңдер';
+
+  @override
+  String get foldersTab => 'Қалталар';
+
+  @override
+  String get artistsTab => 'Орындаушылар';
+
+  @override
+  String get albumsTab => 'Альбомдар';
+
+  @override
+  String get genresTab => 'Жанрлар';
+
+  @override
+  String get noLocalGenres => 'No local genres found';
+
+  @override
+  String get playbackSpeed => 'Ойнату жылдамдығы';
+
+  @override
+  String get addMusic => 'Музыка қосу';
+
+  @override
+  String get addFiles => 'Файлдарды қосу';
+
+  @override
+  String get addFolder => 'Қалтаны қосу';
+
+  @override
+  String get rescanLibrary => 'Кітапхананы қайта сканерлеу';
+
+  @override
+  String get sortTitle => 'Атауы бойынша сұрыптау';
+
+  @override
+  String get sortArtist => 'Орындаушы бойынша сұрыптау';
+
+  @override
+  String get sortAlbum => 'Альбом бойынша сұрыптау';
+
+  @override
+  String get sortDuration => 'Ұзақтығы бойынша сұрыптау';
+
+  @override
+  String get sortDateAdded => 'Қосылған күні бойынша сұрыптау';
+
+  @override
+  String get sortBy => 'Сұрыптау';
+
+  @override
+  String get trackInformation => 'Трек ақпараты';
+
+  @override
+  String get removeFromLibrary => 'Кітапханадан өшіру';
+
+  @override
+  String get showInFolder => 'Қалтада көрсету';
+
+  @override
+  String get unknownArtist => 'Белгісіз орындаушы';
+
+  @override
+  String get unknownAlbum => 'Белгісіз альбом';
+
+  @override
+  String get importedFiles => 'Импортталған файлдар';
+
+  @override
+  String get playFolder => 'Қалтаны ойнату';
+
+  @override
+  String get shuffleFolder => 'Қалтаны араластыру';
+
+  @override
+  String get playAll => 'Барлығын ойнату';
+
+  @override
+  String get includeSubfolders => 'Ішкі қалталарды қосу';
+
+  @override
+  String trackCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count трек',
+      one: '1 трек',
+      zero: '0 трек',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get noLocalSongs => 'Жергілікті әндер табылмады';
+
+  @override
+  String get searchLocalMusic => 'Жергілікті музыканы іздеу...';
+
+  @override
+  String get viewAsList => 'Тізім ретінде қарау';
+
+  @override
+  String get viewAsGrid => 'Тор ретінде қарау';
+
+  @override
+  String get trackInfoPath => 'Жол';
+
+  @override
+  String get trackInfoFormat => 'Пішім';
+
+  @override
+  String get trackInfoDuration => 'Ұзақтығы';
+
+  @override
+  String get aboutDescription => 'Тегін, ашық бастапқы медиа ойнатқыш.';
+
+  @override
+  String get aboutApp => 'PPPlayer туралы';
+
+  @override
+  String get appTagline => 'Сіздің музыкаңыз. Сіздің стиліңіз.';
+
+  @override
+  String get exploreApp => 'PPPlayer шолу';
+
+  @override
+  String get viewSource => 'Кодты көру';
+
+  @override
+  String get seeWhatsNew => 'Жаңалықтар';
+
+  @override
+  String get getHelp => 'Көмек алу';
+
+  @override
+  String versionInfo(Object version, Object build) {
+    return 'Нұсқасы $version (Құрастыру $build)';
+  }
+
+  @override
+  String get createdBy => 'Жасаған Lucas Coelho';
+
+  @override
+  String get website => 'Веб-сайт';
+
+  @override
+  String get github => 'GitHub';
+
+  @override
+  String get releaseNotes => 'Шығарылым жазбалары';
+
+  @override
+  String get support => 'Қолдау';
+
+  @override
+  String get license => 'Лицензия';
+
+  @override
+  String get acknowledgments => 'Алғыстар';
+
+  @override
+  String get close => 'Жабу';
+
+  @override
+  String copyright(Object year) {
+    return '© $year PPPlayer үлескерлері';
+  }
+
+  @override
+  String get goodMorning => 'Қайырлы таң';
+
+  @override
+  String get goodAfternoon => 'Қайырлы күн';
+
+  @override
+  String get goodEvening => 'Қайырлы кеш';
+
+  @override
+  String greetingWithName(Object greeting, Object name) {
+    return '$greeting, $name';
+  }
+
+  @override
+  String get yourMusicIsWaiting => 'Музыкаңыз сізді күтуде.';
+
+  @override
+  String dailyMix(Object number) {
+    return 'Күнделікті микс $number';
+  }
+
+  @override
+  String get yourFavoritesAndNewDiscoveries =>
+      'Сіздің сүйіктілеріңіз\nжәне жаңалықтар';
+
+  @override
+  String get discoverWeekly => 'Апталық жаңалықтар';
+
+  @override
+  String get releaseRadar => 'Жаңа релиздер';
+
+  @override
+  String get newMusicJustForYou => 'Тек сізге арналған\nжаңа музыка';
+
+  @override
+  String get chillMix => 'Чилл микс';
+
+  @override
+  String get relaxAndUnwind => 'Демалып, рахаттаныңыз';
+
+  @override
+  String get focusMix => 'Фокус микс';
+
+  @override
+  String get deepFocusAndProductivity => 'Терең назар\nжәне өнімділік';
+
+  @override
+  String artistRadio(Object artist) {
+    return '$artist радиосы';
+  }
+
+  @override
+  String genreRadio(Object genre) {
+    return '$genre радиосы';
+  }
+
+  @override
+  String get filterAll => 'Барлығы';
+
+  @override
+  String get filterPlaylists => 'Ойнату тізімдері';
+
+  @override
+  String get filterArtists => 'Әртістер';
+
+  @override
+  String get filterAlbums => 'Альбомдар';
+
+  @override
+  String get filterStations => 'Станциялар';
+
+  @override
+  String get filterStreams => 'Ағындар';
+
+  @override
+  String get localMusicCard => 'Жергілікті музыка';
+
+  @override
+  String get createPlaylistButton => 'Ойнату тізімін жасау';
+
+  @override
+  String get radioStations => 'Радиостанциялар';
+
+  @override
+  String get discoverMusic => 'Музыканы табу';
+
+  @override
+  String get importLocalMusic => 'Жергілікті музыканы импорттау';
+
+  @override
+  String get importAudioFiles => 'Аудио файлдарды импорттау';
+
+  @override
+  String get importFolder => 'Қалтаны импорттау';
+
+  @override
+  String get importFolderSubtitle => 'Аудио файлдары бар қалтаны таңдаңыз';
+
+  @override
+  String get importPlaylist => 'Ойнату тізімін импорттау';
+
+  @override
+  String get importPlaylistSubtitle => '.m3u немесе .m3u8 файлын импорттау';
+
+  @override
+  String get exportPlaylist => 'Ойнату тізімін экспорттау';
+
+  @override
+  String get playbackErrorUnsupportedFormat =>
+      'Қолдау көрсетілмейтін пішім немесе зақымдалған файл';
+
+  @override
+  String get playbackErrorFileInaccessible =>
+      'Файл қолжетімсіз немесе табылмады';
+
+  @override
+  String get localVideosCard => 'Жергілікті бейнелер';
+
+  @override
+  String get noLocalVideos => 'Бейнелер табылмады';
+
+  @override
+  String get searchLocalVideos => 'Жергілікті бейнелерді іздеу';
+
+  @override
+  String get addVideos => 'Бейнелер қосу';
+
+  @override
+  String get subtitles => 'Субтитрлер';
+
+  @override
+  String get audioTracks => 'Аудио жолдар';
+
+  @override
+  String get loadSubtitleFile => 'Субтитр файлын жүктеу...';
+
+  @override
+  String errorLoadingSubtitle(String error) {
+    return 'Субтитрді жүктеу қатесі: $error';
+  }
+
+  @override
+  String get off => 'Өшірулі';
+
+  @override
+  String get playOn => 'Осы құрылғыда ойнату';
+
+  @override
+  String get thisDevice => 'Бұл құрылғы';
+
+  @override
+  String get availableDevices => 'Қолжетімді құрылғылар';
+
+  @override
+  String get searchingDevices => 'Құрылғылар ізделуде…';
+
+  @override
+  String get refresh => 'Жаңарту';
+
+  @override
+  String get connecting => 'Қосылуда…';
+
+  @override
+  String connectingTo(String name) {
+    return '$name құрылғысына қосылуда…';
+  }
+
+  @override
+  String get connected => 'Қосылды';
+
+  @override
+  String get unsupportedOutput => 'Бұл көзді осы шығыста ойнату мүмкін емес.';
+
+  @override
+  String get airPlayAudioOutput => 'AirPlay және дыбыс шығысы';
+
+  @override
+  String get returnForAirPlay =>
+      'AirPlay пайдалану үшін осы құрылғыда ойнатыңыз.';
+
+  @override
+  String get openSoundSettings =>
+      'Шығысты таңдау үшін дыбыс параметрлерін ашыңыз.';
+
+  @override
+  String get soundSettingsError => 'Дыбыс параметрлерін ашу мүмкін болмады.';
+
+  @override
+  String get systemOutput => 'Жүйелік шығыс';
+
+  @override
+  String playingOn(String name) {
+    return '$name құрылғысында ойнатылуда';
+  }
+
+  @override
+  String get chooseAirPlay =>
+      'Динамик немесе теледидар таңдау үшін AirPlay түймесін түртіңіз.';
+
+  @override
+  String get airPlayDevice => 'AirPlay құрылғысы';
+
+  @override
+  String get playOnIphone => 'Осы iPhone құрылғысында ойнату';
+
+  @override
+  String get chooseIphone =>
+      'Төмендегі AirPlay түймесімен осы iPhone құрылғысын таңдаңыз.';
+
+  @override
+  String get profile => 'Профиль';
+
+  @override
+  String get preferences => 'Баптаулар';
+
+  @override
+  String get themeColor => 'Тақырып түсі';
+
+  @override
+  String get yourMusic => 'Музыкаңыз';
+
+  @override
+  String get apiCredentials => 'API тіркелгі деректері';
+
+  @override
+  String get dataStorage => 'Деректер және сақтау орны';
+
+  @override
+  String get editProfileHelp => 'Атыңыз бен аватарыңызды орнатыңыз';
+
+  @override
+  String get customProvider => 'Арнайы провайдер';
+
+  @override
+  String get defaultProvider => 'PPPlayer әдепкісі';
+
+  @override
+  String get proExperience => 'Pro мүмкіндіктері белсенді';
+
+  @override
+  String get beta => 'Бета';
+
+  @override
+  String get loading => 'Жүктелуде…';
+
+  @override
+  String get unknown => 'Белгісіз';
+
+  @override
+  String get pause => 'Кідірту';
+
+  @override
+  String get repeat => 'Қайталау';
+
+  @override
+  String get mute => 'Дыбысты өшіру';
+
+  @override
+  String get unmute => 'Дыбысты қосу';
+
+  @override
+  String get fitVideo => 'Сыйдыру';
+
+  @override
+  String get fillVideo => 'Толтыру';
+
+  @override
+  String get fullscreen => 'Толық экран';
+
+  @override
+  String get exitFullscreen => 'Толық экраннан шығу';
+
+  @override
+  String get volume => 'Дыбыс деңгейі';
+
+  @override
+  String get save => 'Сақтау';
+
+  @override
+  String get delete => 'Жою';
+
+  @override
+  String get clear => 'Тазалау';
+
+  @override
+  String get follow => 'Жазылу';
+
+  @override
+  String get unfollow => 'Жазылудан бас тарту';
+
+  @override
+  String get following => 'Жазылған';
+
+  @override
+  String get showAll => 'Барлығын көрсету';
+
+  @override
+  String get appearance => 'Көрініс';
+
+  @override
+  String get subtitleSize => 'Өлшем';
+
+  @override
+  String get subtitleBackground => 'Фон';
+
+  @override
+  String get earlier => 'Ертерек';
+
+  @override
+  String get later => 'Кейінірек';
+
+  @override
+  String get reset => 'Қалпына келтіру';
+
+  @override
+  String subtitleDelay(String seconds) {
+    return 'Кідіріс: $seconds с';
+  }
+
+  @override
+  String get morePlaybackControls => 'Қосымша ойнату басқару элементтері';
+
+  @override
+  String get hideVideo => 'Бейнені жасыру';
+
+  @override
+  String get showVideo => 'Бейнені көрсету';
+
+  @override
+  String get closeQueue => 'Кезекті жабу';
+
+  @override
+  String get enabled => 'Қосулы';
+
+  @override
+  String get openFile => 'Файлды ашу…';
+
+  @override
+  String get openFolder => 'Қалтаны ашу…';
+
+  @override
+  String get openUrl => 'URL ашу…';
+
+  @override
+  String get fileMenu => 'Файл';
+
+  @override
+  String get viewMenu => 'Көрініс';
+
+  @override
+  String get windowMenu => 'Терезе';
+
+  @override
+  String get saveChanges => 'Өзгерістерді сақтау';
+
+  @override
+  String get themeAvatarColor => 'Тақырып пен аватар түсі';
+
+  @override
+  String get networkStreams => 'Желілік ағындар';
+
+  @override
+  String get networkStream => 'Желілік ағын';
+
+  @override
+  String get openNetworkStream => 'Желілік ағынды ашу';
+
+  @override
+  String get editPlaylist => 'Ойнату тізімін өңдеу';
+
+  @override
+  String get editStreamItem => 'Ағын элементін өңдеу';
+
+  @override
+  String get streamUrl => 'Ағын URL-і';
+
+  @override
+  String get platformType => 'Платформа / түрі';
+
+  @override
+  String get optionalTitle => 'Тақырып (міндетті емес)';
+
+  @override
+  String get optionalImageUrl => 'Сурет URL-і (міндетті емес)';
+
+  @override
+  String get myStream => 'Менің ағыным';
+
+  @override
+  String get saveToLibrary => 'Кітапханаға сақтау';
+
+  @override
+  String get justPlay => 'Тек ойнату';
+
+  @override
+  String get autoDetect => 'Автоматты анықтау';
+
+  @override
+  String get apiKeyRequired => 'API кілті қажет';
+
+  @override
+  String get customApiKey => 'Өз API кілтін пайдалану';
+
+  @override
+  String get clientId => 'Клиент ID-і';
+
+  @override
+  String get clientSecret => 'Клиент құпиясы';
+
+  @override
+  String get saveCredentials => 'Тіркелгі деректерін сақтау';
+
+  @override
+  String get searchStrategy => 'Іздеу тәсілі';
+
+  @override
+  String get credentialsLocalOnly =>
+      'Осы құрылғыда қауіпсіз сақталады. PPPlayer-ге ешқашан жіберілмейді.';
+
+  @override
+  String get scrapingHelp =>
+      'API кілті немесе квота қажет емес. Баяуырақ не сенімділігі төмен болуы мүмкін.';
+
+  @override
+  String get streamHelp =>
+      'HTTP(S) URL-ін немесе M3U тізімінің сілтемесін енгізіңіз.';
+
+  @override
+  String get deletePlaylistConfirm =>
+      'Бұл ойнату тізімін біржола жою керек пе?';
+
+  @override
+  String get clearCacheConfirm =>
+      'Кэш деректерін жою керек пе? Кітапхана мен таңдаулылар өзгермейді.';
+
+  @override
+  String get clearHistoryConfirm => 'Тыңдау тарихын біржола жою керек пе?';
+
+  @override
+  String get addedToQueue => 'Кезекке қосылды';
+
+  @override
+  String get addedVideo => 'Бейне қосылды';
+
+  @override
+  String addedChannels(String count) {
+    return 'Қосылған арналар: $count';
+  }
+
+  @override
+  String get removedFromPlaylist => 'Ойнату тізімінен алынды';
+
+  @override
+  String get exportCancelled => 'Экспорт тоқтатылды';
+
+  @override
+  String exportComplete(String count) {
+    return 'Тізім экспортталды. Өткізілген элементтер: $count';
+  }
+
+  @override
+  String get playlistExported => 'Тізім экспортталды';
+
+  @override
+  String get live => 'Тікелей эфир';
+
+  @override
+  String get sponsored => 'Демеушілік';
+
+  @override
+  String get removeFromPlaylist => 'Тізімнен алып тастау';
+
+  @override
+  String get likedSongsHelp => 'Әндерді сақтасаңыз, осында көрінеді';
+
+  @override
+  String get apiSingleVideoHint =>
+      'Бұл бейнені тізімді импорттамай қосуға болады.';
+
+  @override
+  String get linkCopied => 'Сілтеме көшірілді';
+
+  @override
+  String get willPlayNext => 'Келесі болып ойнатылады';
+
+  @override
+  String get checkItOut => 'Қарау';
+
+  @override
+  String get loadFailed => 'Мазмұнды жүктеу мүмкін болмады. Қайталап көріңіз.';
+
+  @override
+  String get removeFolder => 'Қалтаны өшіру';
+
+  @override
+  String get removeFolderConfirmTitle => 'Қалтаны өшіру керек пе?';
+
+  @override
+  String removeFolderConfirmMessage(String name) {
+    return '\"$name\" қалтасын және оның медиасын кітапханадан өшіру керек пе? Дискідегі файлдар жойылмайды.';
+  }
+
+  @override
+  String fileMissingOnDisk(String name) {
+    return '\"$name\" дискіде табылмады';
+  }
+
+  @override
+  String get folderUnavailable =>
+      'Қалта қолжетімсіз. Дискінің қосылғанын тексеріңіз.';
+
+  @override
+  String fileAlreadyImported(String name) {
+    return '\"$name\" кітапханаңызда бар';
+  }
+
+  @override
+  String filesAlreadyImported(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count файл кітапханаңызда бұрыннан бар',
+      one: '1 файл кітапханаңызда бұрыннан бар',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get folderAlreadyImported =>
+      'Бұл қалта импортталған — жаңа файлдар тексерілуде';
+
+  @override
+  String get rescanCompleted => 'Кітапхананы қайта сканерлеу аяқталды';
+
+  @override
+  String rescanFailed(String error) {
+    return 'Қалтаны қайта сканерлеу сәтсіз аяқталды: $error';
+  }
+
+  @override
+  String get importedFolderFallback => 'Импортталған қалта';
+}

@@ -1,0 +1,1154 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Nigerian Pidgin (`pcm`).
+class AppLocalizationsPcm extends AppLocalizations {
+  AppLocalizationsPcm([String locale = 'pcm']) : super(locale);
+
+  @override
+  String get appTitle => 'PPPlayer';
+
+  @override
+  String titleSubtitle(Object title, Object subtitle) {
+    return '$title, $subtitle';
+  }
+
+  @override
+  String get albums => 'Albums';
+
+  @override
+  String get api => 'API';
+
+  @override
+  String get artists => 'ARTIS DEM';
+
+  @override
+  String get artwork => 'Artwork';
+
+  @override
+  String get appVersion => 'App vershon';
+
+  @override
+  String get artist => 'Artis';
+
+  @override
+  String get artistsYouFollow => 'Artists wey yu dey follow';
+
+  @override
+  String get autoplay => 'Play amsef';
+
+  @override
+  String get becauseYouListenedTo => 'Because yu listen to';
+
+  @override
+  String get browseAll => 'See everything';
+
+  @override
+  String get cancel => 'Cancel am';
+
+  @override
+  String get clearAppCache => 'Comot App Cache?';
+
+  @override
+  String get clearCache => 'Comot Cache';
+
+  @override
+  String get clearHistory => 'Comot History?';
+
+  @override
+  String get clearRecentlyPlayed => 'Clear Recent Songs';
+
+  @override
+  String get contentMarket => 'Content Market';
+
+  @override
+  String get continueListening => 'Kontinu to listen';
+
+  @override
+  String get continueVideoPlaybackInASmallWindow =>
+      'Kontinu video for small window';
+
+  @override
+  String get create => 'Make';
+
+  @override
+  String get createAPlaylistToGetStarted => 'Create playlist to start';
+
+  @override
+  String currentSelectedcountry(Object country) {
+    return 'Current: $country';
+  }
+
+  @override
+  String get deletePlaylist => 'Delete Playlist';
+
+  @override
+  String get editProfile => 'Change Profile';
+
+  @override
+  String errorLoadingMarkets(Object err) {
+    return 'Error to load markets: $err';
+  }
+
+  @override
+  String error(Object error) {
+    return 'Wahala: $error';
+  }
+
+  @override
+  String explore(Object genre) {
+    return 'Explore $genre';
+  }
+
+  @override
+  String get fansAlsoLike => 'FANS LIKE THIS ONE TOO';
+
+  @override
+  String featuringTouppercase(Object artist) {
+    return 'E CARRY $artist';
+  }
+
+  @override
+  String get featuredPlaylists => 'Odogwu Playlists';
+
+  @override
+  String get followArtistsToSeeThemHere =>
+      'Follow artists make yu see dem here';
+
+  @override
+  String get followStationsToSeeThemHere =>
+      'Follow stations make yu see dem here';
+
+  @override
+  String get forceAudioonlyStreamsToSaveData => 'Force audio only to save data';
+
+  @override
+  String get freesUpSpaceAndForcesFreshDataOnNextLoad =>
+      'Free space and bring new data for next load';
+
+  @override
+  String get fromYourFavorites => 'From your favorites';
+
+  @override
+  String get goBack => 'Go back';
+
+  @override
+  String inspiredByName(Object name) {
+    return 'Ginger from $name';
+  }
+
+  @override
+  String get keepPlayingSimilarTracksWhenQueueEnds =>
+      'Keep playing similar songs when queue finish';
+
+  @override
+  String get library => 'My load';
+
+  @override
+  String get likeAlbumsToSeeThemHere => 'Like albums make yu see dem here';
+
+  @override
+  String get likedSongs => 'Songs wey yu like';
+
+  @override
+  String get lowDataMode => 'Low Data Mode';
+
+  @override
+  String get madeForYou => 'Made For You';
+
+  @override
+  String moreLikeName(Object name) {
+    return 'More like $name';
+  }
+
+  @override
+  String get moreOptions => 'More options';
+
+  @override
+  String get nameYourMasterpiece => 'Give your masterpiece name...';
+
+  @override
+  String get newPlaylist => 'New Playlist';
+
+  @override
+  String get newReleases => 'New Releases';
+
+  @override
+  String get next => 'Next one';
+
+  @override
+  String get noAlbumsFound => 'No album wey dem find';
+
+  @override
+  String get noArtistsFollowed => 'You never follow any artist';
+
+  @override
+  String get noArtistsFound => 'No artist wey dem find';
+
+  @override
+  String get noLikedAlbums => 'No album wey yu like';
+
+  @override
+  String get noPlaylistsFound => 'No playlist wey dem find';
+
+  @override
+  String get noPlaylistsYet => 'No playlist yet';
+
+  @override
+  String get noResultsFound => 'No result wey dem find';
+
+  @override
+  String get noStationsFollowed => 'You never follow any station';
+
+  @override
+  String get noTrackPlaying => 'No song dey play';
+
+  @override
+  String get noTracksFound => 'No song wey dem find';
+
+  @override
+  String get playlists => 'Playlists';
+
+  @override
+  String get popular => 'Popular';
+
+  @override
+  String get permanentlyRemoveListeningHistory =>
+      'Remove listening history for good';
+
+  @override
+  String get pictureinpicturePip => 'Picture-in-Picture (PiP)';
+
+  @override
+  String get popularAlbums => 'Bad Albums';
+
+  @override
+  String get popularArtists => 'Odogwu Artists';
+
+  @override
+  String get popularGenres => 'Popular Genres';
+
+  @override
+  String get popularSongs => 'Bad Songs';
+
+  @override
+  String get popularTracks => 'Popular Tracks';
+
+  @override
+  String get popularHitsRightNow => 'Popular songs now now';
+
+  @override
+  String get previous => 'Before';
+
+  @override
+  String get queue => 'Queue';
+
+  @override
+  String get recentSearches => 'Wetin you find before';
+
+  @override
+  String get recommendedForYou => 'Recommended For You';
+
+  @override
+  String get scraping => 'Getting data';
+
+  @override
+  String get search => 'Find am';
+
+  @override
+  String get searchInAlbum => 'Search inside album...';
+
+  @override
+  String get searchInLibrary => 'Search inside library...';
+
+  @override
+  String get searchInPlaylist => 'Search inside playlist';
+
+  @override
+  String get searchLikedSongs => 'Search songs wey yu like...';
+
+  @override
+  String get searchPopularSongs => 'Find popular songs...';
+
+  @override
+  String get selectMarket => 'Pick Market';
+
+  @override
+  String get settings => 'Settings';
+
+  @override
+  String get showVideoPlayer => 'Show Video Player';
+
+  @override
+  String get shuffle => 'Scatter am';
+
+  @override
+  String get spotifyCredentials => 'Spotify Credentials';
+
+  @override
+  String get suggestedStations => 'Stations wey dem suggest';
+
+  @override
+  String get tracks => 'Tracks';
+
+  @override
+  String get trending => 'Trending';
+
+  @override
+  String get tryAgain => 'Try again';
+
+  @override
+  String get tryADifferentSearchTerm => 'Try different search word';
+
+  @override
+  String get useYoutubePlayerWhenAvailable => 'Use YouTube player if e dey';
+
+  @override
+  String get video => 'VIDEO';
+
+  @override
+  String get whatDoYouWantToListenTo => 'Wetin yu wan listen to?';
+
+  @override
+  String get youtubeCredentials => 'YouTube Credentials';
+
+  @override
+  String get yourLibrary => 'Your Library';
+
+  @override
+  String get playerscreenviewswitch => 'player_screen_view_switch';
+
+  @override
+  String get addToPlaylist => 'Put for playlist';
+
+  @override
+  String get addToQueue => 'Put for queue';
+
+  @override
+  String get copyId => 'Copy ID';
+
+  @override
+  String get copyLink => 'Copy link';
+
+  @override
+  String get copySpotifyLink => 'Copy Spotify link';
+
+  @override
+  String get copyYouTubeLink => 'Copy YouTube link';
+
+  @override
+  String get copySpotifyId => 'Copy Spotify ID';
+
+  @override
+  String get copyYouTubeId => 'Copy YouTube ID';
+
+  @override
+  String get idCopied => 'ID don copy';
+
+  @override
+  String get discover => 'Find';
+
+  @override
+  String get enterYourName => 'Put your name';
+
+  @override
+  String get favorites => 'My favorites';
+
+  @override
+  String get goToAlbum => 'Go album side';
+
+  @override
+  String get goToArtist => 'Go artist side';
+
+  @override
+  String get goToArtistRadio => 'Go artist radio';
+
+  @override
+  String get goToPlaylist => 'Go playlist side';
+
+  @override
+  String get goToSongRadio => 'Go song radio';
+
+  @override
+  String get home => 'House';
+
+  @override
+  String get myAwesomePlaylist => 'My Fine Playlist';
+
+  @override
+  String get myPlaylist => 'My Playlist';
+
+  @override
+  String get newPlaylist1 => 'New playlist';
+
+  @override
+  String get play => 'Play am';
+
+  @override
+  String get playStation => 'Play Station';
+
+  @override
+  String get playNext => 'Play next';
+
+  @override
+  String get playlist => 'Playlist';
+
+  @override
+  String get playlistName => 'Playlist Name';
+
+  @override
+  String get playlists1 => 'Playlists';
+
+  @override
+  String get queue1 => 'Queue';
+
+  @override
+  String get queueNowPlaying => 'De play now';
+
+  @override
+  String get queueUpNext => 'Next song';
+
+  @override
+  String get recentlyPlayed => 'Wetin I play last';
+
+  @override
+  String get removeFromQueue => 'Comot from queue';
+
+  @override
+  String get retry => 'Try again';
+
+  @override
+  String get searchMusicArtistsAlbums => 'Find music, artists, albums...';
+
+  @override
+  String get share => 'Share am';
+
+  @override
+  String featuringArtist(String artistName) {
+    return 'E CARRY $artistName';
+  }
+
+  @override
+  String currentCountry(String country) {
+    return 'Current: $country';
+  }
+
+  @override
+  String get queueTooltip => 'Queue';
+
+  @override
+  String get searchHint => 'Find music, artists, albums...';
+
+  @override
+  String get language => 'Language';
+
+  @override
+  String get systemDefault => 'System Default';
+
+  @override
+  String get songsTab => 'Songs';
+
+  @override
+  String get foldersTab => 'Folders';
+
+  @override
+  String get artistsTab => 'Artists';
+
+  @override
+  String get albumsTab => 'Albums';
+
+  @override
+  String get genresTab => 'Genres';
+
+  @override
+  String get noLocalGenres => 'No local genres found';
+
+  @override
+  String get playbackSpeed => 'Playback Speed';
+
+  @override
+  String get addMusic => 'Add Music';
+
+  @override
+  String get addFiles => 'Add Files';
+
+  @override
+  String get addFolder => 'Add Folder';
+
+  @override
+  String get rescanLibrary => 'Rescan Library';
+
+  @override
+  String get sortTitle => 'Sort by Title';
+
+  @override
+  String get sortArtist => 'Sort by Artist';
+
+  @override
+  String get sortAlbum => 'Sort by Album';
+
+  @override
+  String get sortDuration => 'Sort by Duration';
+
+  @override
+  String get sortDateAdded => 'Sort by Date';
+
+  @override
+  String get sortBy => 'Sort by';
+
+  @override
+  String get trackInformation => 'Track Informashon';
+
+  @override
+  String get removeFromLibrary => 'Remove from Library';
+
+  @override
+  String get showInFolder => 'Show in Folder';
+
+  @override
+  String get unknownArtist => 'Unknown Artist';
+
+  @override
+  String get unknownAlbum => 'Unknown Album';
+
+  @override
+  String get importedFiles => 'Imported Files';
+
+  @override
+  String get playFolder => 'Play Folder';
+
+  @override
+  String get shuffleFolder => 'Shuffle Folder';
+
+  @override
+  String get playAll => 'Play All';
+
+  @override
+  String get includeSubfolders => 'Include Subfolders';
+
+  @override
+  String trackCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count tracks',
+      one: '1 track',
+      zero: '0 tracks',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get noLocalSongs => 'No local songs found';
+
+  @override
+  String get searchLocalMusic => 'Search local music...';
+
+  @override
+  String get viewAsList => 'View as List';
+
+  @override
+  String get viewAsGrid => 'View as Grid';
+
+  @override
+  String get trackInfoPath => 'Path';
+
+  @override
+  String get trackInfoFormat => 'Format';
+
+  @override
+  String get trackInfoDuration => 'Duration';
+
+  @override
+  String get aboutDescription => 'Free and open-source media player.';
+
+  @override
+  String get aboutApp => 'About PPPlayer';
+
+  @override
+  String get appTagline => 'Your music. Your way.';
+
+  @override
+  String get exploreApp => 'Explore PPPlayer';
+
+  @override
+  String get viewSource => 'View source';
+
+  @override
+  String get seeWhatsNew => 'See wetin be new';
+
+  @override
+  String get getHelp => 'Get help';
+
+  @override
+  String versionInfo(Object version, Object build) {
+    return 'Vershon $version (Build $build)';
+  }
+
+  @override
+  String get createdBy => 'Na Lucas Coelho do am';
+
+  @override
+  String get website => 'Website';
+
+  @override
+  String get github => 'GitHub';
+
+  @override
+  String get releaseNotes => 'Release notes';
+
+  @override
+  String get support => 'Help';
+
+  @override
+  String get license => 'License';
+
+  @override
+  String get acknowledgments => 'Acknowledgments';
+
+  @override
+  String get close => 'Close am';
+
+  @override
+  String copyright(Object year) {
+    return '© $year PPPlayer contributors';
+  }
+
+  @override
+  String get goodMorning => 'Good morning';
+
+  @override
+  String get goodAfternoon => 'Good afternoon';
+
+  @override
+  String get goodEvening => 'Good evening';
+
+  @override
+  String greetingWithName(Object greeting, Object name) {
+    return '$greeting, $name';
+  }
+
+  @override
+  String get yourMusicIsWaiting => 'Your music dey wait.';
+
+  @override
+  String dailyMix(Object number) {
+    return 'Daily Mix $number';
+  }
+
+  @override
+  String get yourFavoritesAndNewDiscoveries => 'Your favorites\nand new jams';
+
+  @override
+  String get discoverWeekly => 'Discover Weekly';
+
+  @override
+  String get releaseRadar => 'Release Radar';
+
+  @override
+  String get newMusicJustForYou => 'New music\njust for yu';
+
+  @override
+  String get chillMix => 'Chill Mix';
+
+  @override
+  String get relaxAndUnwind => 'Relax and enjoy';
+
+  @override
+  String get focusMix => 'Focus Mix';
+
+  @override
+  String get deepFocusAndProductivity => 'Deep focus\nand hard work';
+
+  @override
+  String artistRadio(Object artist) {
+    return '$artist Radio';
+  }
+
+  @override
+  String genreRadio(Object genre) {
+    return '$genre Radio';
+  }
+
+  @override
+  String get filterAll => 'All';
+
+  @override
+  String get filterPlaylists => 'Playlists';
+
+  @override
+  String get filterArtists => 'Artists';
+
+  @override
+  String get filterAlbums => 'Albums';
+
+  @override
+  String get filterStations => 'Stations';
+
+  @override
+  String get filterStreams => 'Streams';
+
+  @override
+  String get localMusicCard => 'Local Music';
+
+  @override
+  String get createPlaylistButton => 'Create Playlist';
+
+  @override
+  String get radioStations => 'Radio Stations';
+
+  @override
+  String get discoverMusic => 'Find Music';
+
+  @override
+  String get importLocalMusic => 'Import Local Music';
+
+  @override
+  String get importAudioFiles => 'Import Audio Files';
+
+  @override
+  String get importFolder => 'Import Folder';
+
+  @override
+  String get importFolderSubtitle => 'Choose folder wey get audio files';
+
+  @override
+  String get importPlaylist => 'Import playlist';
+
+  @override
+  String get importPlaylistSubtitle => 'Import .m3u or .m3u8 file';
+
+  @override
+  String get exportPlaylist => 'Export playlist';
+
+  @override
+  String get playbackErrorUnsupportedFormat =>
+      'Unsupported format or corrupted file';
+
+  @override
+  String get playbackErrorFileInaccessible => 'File inaccessible or not found';
+
+  @override
+  String get localVideosCard => 'Local Videos';
+
+  @override
+  String get noLocalVideos => 'No video dey';
+
+  @override
+  String get searchLocalVideos => 'Search local videos';
+
+  @override
+  String get addVideos => 'Add videos';
+
+  @override
+  String get subtitles => 'Subtitles';
+
+  @override
+  String get audioTracks => 'Audio Tracks';
+
+  @override
+  String get loadSubtitleFile => 'Load subtitle file...';
+
+  @override
+  String errorLoadingSubtitle(String error) {
+    return 'Wahala don shele as we dey load di subtitle: $error';
+  }
+
+  @override
+  String get off => 'Off';
+
+  @override
+  String get playOn => 'Play for';
+
+  @override
+  String get thisDevice => 'Dis device';
+
+  @override
+  String get availableDevices => 'Devices wey dey available';
+
+  @override
+  String get searchingDevices => 'Dey find devices…';
+
+  @override
+  String get refresh => 'Refresh am';
+
+  @override
+  String get connecting => 'Dey connect…';
+
+  @override
+  String connectingTo(String name) {
+    return 'Dey connect to $name…';
+  }
+
+  @override
+  String get connected => 'Don connect';
+
+  @override
+  String get unsupportedOutput => 'Dis source no fit play for dis output.';
+
+  @override
+  String get airPlayAudioOutput => 'AirPlay and sound output';
+
+  @override
+  String get returnForAirPlay => 'Play for dis device to use AirPlay.';
+
+  @override
+  String get openSoundSettings => 'Open sound settings to choose output.';
+
+  @override
+  String get soundSettingsError => 'No fit open sound settings.';
+
+  @override
+  String get systemOutput => 'System sound output';
+
+  @override
+  String playingOn(String name) {
+    return 'Dey play for $name';
+  }
+
+  @override
+  String get chooseAirPlay => 'Tap AirPlay button to choose speaker or TV.';
+
+  @override
+  String get airPlayDevice => 'AirPlay device';
+
+  @override
+  String get playOnIphone => 'Play for dis iPhone';
+
+  @override
+  String get chooseIphone => 'Choose dis iPhone with di AirPlay button below.';
+
+  @override
+  String get profile => 'Your profile';
+
+  @override
+  String get preferences => 'Settings wey you prefer';
+
+  @override
+  String get themeColor => 'Theme colour';
+
+  @override
+  String get yourMusic => 'Your music';
+
+  @override
+  String get apiCredentials => 'API login details';
+
+  @override
+  String get dataStorage => 'Data and storage';
+
+  @override
+  String get editProfileHelp => 'Set your name and avatar';
+
+  @override
+  String get customProvider => 'Provider wey you choose';
+
+  @override
+  String get defaultProvider => 'PPPlayer normal provider';
+
+  @override
+  String get proExperience => 'Pro experience don dey active';
+
+  @override
+  String get beta => 'Beta version';
+
+  @override
+  String get loading => 'Dey load…';
+
+  @override
+  String get unknown => 'We no know';
+
+  @override
+  String get pause => 'Pause am';
+
+  @override
+  String get repeat => 'Repeat am';
+
+  @override
+  String get mute => 'Off di sound';
+
+  @override
+  String get unmute => 'On di sound';
+
+  @override
+  String get fitVideo => 'Make am fit';
+
+  @override
+  String get fillVideo => 'Fill di screen';
+
+  @override
+  String get fullscreen => 'Full screen';
+
+  @override
+  String get exitFullscreen => 'Comot full screen';
+
+  @override
+  String get volume => 'Sound level';
+
+  @override
+  String get save => 'Save am';
+
+  @override
+  String get delete => 'Delete am';
+
+  @override
+  String get clear => 'Clear am';
+
+  @override
+  String get follow => 'Follow am';
+
+  @override
+  String get unfollow => 'Stop to follow';
+
+  @override
+  String get following => 'You dey follow';
+
+  @override
+  String get showAll => 'Show all';
+
+  @override
+  String get appearance => 'How e look';
+
+  @override
+  String get subtitleSize => 'Size';
+
+  @override
+  String get subtitleBackground => 'Background';
+
+  @override
+  String get earlier => 'Earlier small';
+
+  @override
+  String get later => 'Later small';
+
+  @override
+  String get reset => 'Reset am';
+
+  @override
+  String subtitleDelay(String seconds) {
+    return 'Delay: $seconds seconds';
+  }
+
+  @override
+  String get morePlaybackControls => 'More controls for playback';
+
+  @override
+  String get hideVideo => 'Hide di video';
+
+  @override
+  String get showVideo => 'Show di video';
+
+  @override
+  String get closeQueue => 'Close di queue';
+
+  @override
+  String get enabled => 'E dey on';
+
+  @override
+  String get openFile => 'Open file…';
+
+  @override
+  String get openFolder => 'Open folder…';
+
+  @override
+  String get openUrl => 'Open URL…';
+
+  @override
+  String get fileMenu => 'File';
+
+  @override
+  String get viewMenu => 'View';
+
+  @override
+  String get windowMenu => 'Window';
+
+  @override
+  String get saveChanges => 'Save di changes';
+
+  @override
+  String get themeAvatarColor => 'Theme and avatar colour';
+
+  @override
+  String get networkStreams => 'Network streams';
+
+  @override
+  String get networkStream => 'Network stream';
+
+  @override
+  String get openNetworkStream => 'Open network stream';
+
+  @override
+  String get editPlaylist => 'Edit di playlist';
+
+  @override
+  String get editStreamItem => 'Edit stream item';
+
+  @override
+  String get streamUrl => 'Stream URL';
+
+  @override
+  String get platformType => 'Platform / type';
+
+  @override
+  String get optionalTitle => 'Title (no be must)';
+
+  @override
+  String get optionalImageUrl => 'Picture URL (no be must)';
+
+  @override
+  String get myStream => 'My stream';
+
+  @override
+  String get saveToLibrary => 'Save for library';
+
+  @override
+  String get justPlay => 'Just play am';
+
+  @override
+  String get autoDetect => 'Detect am by itself';
+
+  @override
+  String get apiKeyRequired => 'API key dey needed';
+
+  @override
+  String get customApiKey => 'Use your own API key';
+
+  @override
+  String get clientId => 'Client ID';
+
+  @override
+  String get clientSecret => 'Client secret';
+
+  @override
+  String get saveCredentials => 'Save di login details';
+
+  @override
+  String get searchStrategy => 'How to search';
+
+  @override
+  String get credentialsLocalOnly =>
+      'E dey safe for dis device. E no dey go PPPlayer at all.';
+
+  @override
+  String get scrapingHelp =>
+      'API key or quota no dey needed. E fit slow small or no work steady.';
+
+  @override
+  String get streamHelp => 'Put HTTP(S) URL or M3U playlist link.';
+
+  @override
+  String get deletePlaylistConfirm => 'Delete dis playlist forever?';
+
+  @override
+  String get clearCacheConfirm =>
+      'Delete cache data? Your library and favourites no go change.';
+
+  @override
+  String get clearHistoryConfirm => 'Delete your listening history forever?';
+
+  @override
+  String get addedToQueue => 'Don add am to queue';
+
+  @override
+  String get addedVideo => 'Don add di video';
+
+  @override
+  String addedChannels(String count) {
+    return 'Channels wey we add: $count';
+  }
+
+  @override
+  String get removedFromPlaylist => 'Don remove am from playlist';
+
+  @override
+  String get exportCancelled => 'Don cancel export';
+
+  @override
+  String exportComplete(String count) {
+    return 'Don export playlist. Items wey we skip: $count';
+  }
+
+  @override
+  String get playlistExported => 'Don export playlist';
+
+  @override
+  String get live => 'E dey live';
+
+  @override
+  String get sponsored => 'Dem sponsor am';
+
+  @override
+  String get removeFromPlaylist => 'Remove am from playlist';
+
+  @override
+  String get likedSongsHelp => 'Save songs make you see dem here';
+
+  @override
+  String get apiSingleVideoHint =>
+      'You fit add dis video without importing di playlist.';
+
+  @override
+  String get linkCopied => 'Don copy di link';
+
+  @override
+  String get willPlayNext => 'E go play next';
+
+  @override
+  String get checkItOut => 'Check am out';
+
+  @override
+  String get loadFailed => 'We no fit load the content. Try again.';
+
+  @override
+  String get removeFolder => 'Remove folder';
+
+  @override
+  String get removeFolderConfirmTitle => 'Remove folder?';
+
+  @override
+  String removeFolderConfirmMessage(String name) {
+    return 'Remove \"$name\" and di media from your library? Files for disk no go delete.';
+  }
+
+  @override
+  String fileMissingOnDisk(String name) {
+    return '\"$name\" no dey disk again';
+  }
+
+  @override
+  String get folderUnavailable =>
+      'Folder no dey. Make you check say drive dey connected.';
+
+  @override
+  String fileAlreadyImported(String name) {
+    return '\"$name\" already dey your library';
+  }
+
+  @override
+  String filesAlreadyImported(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count files already dey your library',
+      one: '1 file already dey your library',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get folderAlreadyImported =>
+      'Dis folder already import — dey check for new files';
+
+  @override
+  String get rescanCompleted => 'Library rescan complete';
+
+  @override
+  String rescanFailed(String error) {
+    return 'Rescan fail for folder: $error';
+  }
+
+  @override
+  String get importedFolderFallback => 'Imported Folder';
+}

@@ -1,0 +1,87 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+*.exe
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+**/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+.env
+
+# Nested android build artifacts
+**/.gradle/
+**/android/build/
+**/example/build/
+
+# Scratch and test files
+dump
+dump_swizzle
+flutter_01.png
+test_imp.swift
+test_proxy.dart
+test_proxy_libmpv.dart
+test_swizzle.swift
+test_yt.dart
+test.js
+
+.env.macos_release*
+.env.android_release*
+keystore_base64.txt
+snapcraft.login
+*.login
+ppplayer_db.sqlite
+settings.hive
+settings.lock
+
+# Rust build artifacts
+**/target/
+
+# Generated Android Kotlin cache
+.kotlin/
+dist/
+
+# Developer-only dependency overrides
+/pubspec_overrides.yaml
+
+# Validation run raw dumps
+docs/validation/**/*-observed/
+docs/validation/**/memory/

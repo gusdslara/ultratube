@@ -1,0 +1,1166 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Polish (`pl`).
+class AppLocalizationsPl extends AppLocalizations {
+  AppLocalizationsPl([String locale = 'pl']) : super(locale);
+
+  @override
+  String get appTitle => 'PPPlayer';
+
+  @override
+  String titleSubtitle(Object title, Object subtitle) {
+    return '$title, $subtitle';
+  }
+
+  @override
+  String get albums => 'ALBUMY';
+
+  @override
+  String get api => 'API';
+
+  @override
+  String get artists => 'ARTYŚCI';
+
+  @override
+  String get artwork => 'OKŁADKA';
+
+  @override
+  String get appVersion => 'Wersja aplikacji';
+
+  @override
+  String get artist => 'Artysta';
+
+  @override
+  String get artistsYouFollow => 'Artyści, których obserwujesz';
+
+  @override
+  String get autoplay => 'Autoodtwarzanie';
+
+  @override
+  String get becauseYouListenedTo => 'Ponieważ słuchałeś';
+
+  @override
+  String get browseAll => 'Przeglądaj wszystko';
+
+  @override
+  String get cancel => 'Anuluj';
+
+  @override
+  String get clearAppCache => 'Wyczyścić pamięć podręczną?';
+
+  @override
+  String get clearCache => 'Wyczyść pamięć podręczną';
+
+  @override
+  String get clearHistory => 'Wyczyścić historię?';
+
+  @override
+  String get clearRecentlyPlayed => 'Wyczyść ostatnio odtwarzane';
+
+  @override
+  String get contentMarket => 'Rynek zawartości';
+
+  @override
+  String get continueListening => 'Słuchaj dalej';
+
+  @override
+  String get continueVideoPlaybackInASmallWindow =>
+      'Odtwarzaj wideo w małym oknie';
+
+  @override
+  String get create => 'Utwórz';
+
+  @override
+  String get createAPlaylistToGetStarted => 'Utwórz playlistę, aby rozpocząć';
+
+  @override
+  String currentSelectedcountry(Object country) {
+    return 'Obecnie: $country';
+  }
+
+  @override
+  String get deletePlaylist => 'Usuń playlistę';
+
+  @override
+  String get editProfile => 'Edytuj profil';
+
+  @override
+  String errorLoadingMarkets(Object err) {
+    return 'Błąd ładowania rynków: $err';
+  }
+
+  @override
+  String error(Object error) {
+    return 'Błąd: $error';
+  }
+
+  @override
+  String explore(Object genre) {
+    return 'Odkryj $genre';
+  }
+
+  @override
+  String get fansAlsoLike => 'FANI LUBIĄ TEŻ';
+
+  @override
+  String featuringTouppercase(Object artist) {
+    return 'Z UDZIAŁEM $artist';
+  }
+
+  @override
+  String get featuredPlaylists => 'Polecane playlisty';
+
+  @override
+  String get followArtistsToSeeThemHere =>
+      'Obserwuj artystów, aby zobaczyć ich tutaj';
+
+  @override
+  String get followStationsToSeeThemHere =>
+      'Obserwuj stacje, aby zobaczyć je tutaj';
+
+  @override
+  String get forceAudioonlyStreamsToSaveData =>
+      'Wymuś odtwarzanie tylko dźwięku, by oszczędzać dane';
+
+  @override
+  String get freesUpSpaceAndForcesFreshDataOnNextLoad =>
+      'Zwalnia miejsce i wymusza pobranie nowych danych';
+
+  @override
+  String get fromYourFavorites => 'Z Twoich ulubionych';
+
+  @override
+  String get goBack => 'Wróć';
+
+  @override
+  String inspiredByName(Object name) {
+    return 'Zainspirowane $name';
+  }
+
+  @override
+  String get keepPlayingSimilarTracksWhenQueueEnds =>
+      'Odtwarzaj podobne utwory po zakończeniu kolejki';
+
+  @override
+  String get library => 'Biblioteka';
+
+  @override
+  String get likeAlbumsToSeeThemHere => 'Polub albumy, aby zobaczyć je tutaj';
+
+  @override
+  String get likedSongs => 'Polubione utwory';
+
+  @override
+  String get lowDataMode => 'Oszczędzanie danych';
+
+  @override
+  String get madeForYou => 'Stworzone dla Ciebie';
+
+  @override
+  String moreLikeName(Object name) {
+    return 'Więcej jak $name';
+  }
+
+  @override
+  String get moreOptions => 'Więcej opcji';
+
+  @override
+  String get nameYourMasterpiece => 'Nazwij swoje arcydzieło...';
+
+  @override
+  String get newPlaylist => 'Nowa playlista';
+
+  @override
+  String get newReleases => 'Nowe wydania';
+
+  @override
+  String get next => 'Dalej';
+
+  @override
+  String get noAlbumsFound => 'Nie znaleziono albumów';
+
+  @override
+  String get noArtistsFollowed => 'Nie obserwujesz żadnych artystów';
+
+  @override
+  String get noArtistsFound => 'Nie znaleziono artystów';
+
+  @override
+  String get noLikedAlbums => 'Brak polubionych albumów';
+
+  @override
+  String get noPlaylistsFound => 'Nie znaleziono playlist';
+
+  @override
+  String get noPlaylistsYet => 'Brak playlist';
+
+  @override
+  String get noResultsFound => 'Brak wyników';
+
+  @override
+  String get noStationsFollowed => 'Nie obserwujesz żadnych stacji';
+
+  @override
+  String get noTrackPlaying => 'Brak odtwarzanego utworu';
+
+  @override
+  String get noTracksFound => 'Nie znaleziono utworów';
+
+  @override
+  String get playlists => 'PLAYLISTY';
+
+  @override
+  String get popular => 'POPULARNE';
+
+  @override
+  String get permanentlyRemoveListeningHistory =>
+      'Trwale usuń historię słuchania';
+
+  @override
+  String get pictureinpicturePip => 'Obraz w obrazie (PiP)';
+
+  @override
+  String get popularAlbums => 'Popularne albumy';
+
+  @override
+  String get popularArtists => 'Popularni artyści';
+
+  @override
+  String get popularGenres => 'Popularne gatunki';
+
+  @override
+  String get popularSongs => 'Popularne utwory';
+
+  @override
+  String get popularTracks => 'Popularne utwory';
+
+  @override
+  String get popularHitsRightNow => 'Obecne hity';
+
+  @override
+  String get previous => 'Wstecz';
+
+  @override
+  String get queue => 'KOLEJKA';
+
+  @override
+  String get recentSearches => 'Ostatnie wyszukiwania';
+
+  @override
+  String get recommendedForYou => 'Polecane dla Ciebie';
+
+  @override
+  String get scraping => 'Pobieranie';
+
+  @override
+  String get search => 'Szukaj';
+
+  @override
+  String get searchInAlbum => 'Szukaj w albumie...';
+
+  @override
+  String get searchInLibrary => 'Szukaj w bibliotece...';
+
+  @override
+  String get searchInPlaylist => 'Szukaj w playliście...';
+
+  @override
+  String get searchLikedSongs => 'Szukaj w polubionych utworach...';
+
+  @override
+  String get searchPopularSongs => 'Szukaj w popularnych utworach...';
+
+  @override
+  String get selectMarket => 'Wybierz rynek';
+
+  @override
+  String get settings => 'Ustawienia';
+
+  @override
+  String get showVideoPlayer => 'Pokaż odtwarzacz wideo';
+
+  @override
+  String get shuffle => 'Losowo';
+
+  @override
+  String get spotifyCredentials => 'Dane uwierzytelniające Spotify';
+
+  @override
+  String get suggestedStations => 'Sugerowane stacje';
+
+  @override
+  String get tracks => 'UTWORY';
+
+  @override
+  String get trending => 'Na czasie';
+
+  @override
+  String get tryAgain => 'Spróbuj ponownie';
+
+  @override
+  String get tryADifferentSearchTerm => 'Spróbuj innych słów';
+
+  @override
+  String get useYoutubePlayerWhenAvailable =>
+      'Używaj odtwarzacza YouTube, gdy dostępny';
+
+  @override
+  String get video => 'WIDEO';
+
+  @override
+  String get whatDoYouWantToListenTo => 'Czego chcesz posłuchać?';
+
+  @override
+  String get youtubeCredentials => 'Dane uwierzytelniające YouTube';
+
+  @override
+  String get yourLibrary => 'Twoja biblioteka';
+
+  @override
+  String get playerscreenviewswitch => 'przelacznik_widoku_ekranu_gracza';
+
+  @override
+  String get addToPlaylist => 'Dodaj do playlisty';
+
+  @override
+  String get addToQueue => 'Dodaj do kolejki';
+
+  @override
+  String get copyId => 'Kopiuj ID';
+
+  @override
+  String get copyLink => 'Kopiuj link';
+
+  @override
+  String get copySpotifyLink => 'Kopiuj link do Spotify';
+
+  @override
+  String get copyYouTubeLink => 'Kopiuj link do YouTube';
+
+  @override
+  String get copySpotifyId => 'Kopiuj identyfikator Spotify';
+
+  @override
+  String get copyYouTubeId => 'Kopiuj identyfikator YouTube';
+
+  @override
+  String get idCopied => 'Skopiowano identyfikator';
+
+  @override
+  String get discover => 'Odkrywaj';
+
+  @override
+  String get enterYourName => 'Wpisz swoje imię';
+
+  @override
+  String get favorites => 'Ulubione';
+
+  @override
+  String get goToAlbum => 'Przejdź do albumu';
+
+  @override
+  String get goToArtist => 'Przejdź do artysty';
+
+  @override
+  String get goToArtistRadio => 'Przejdź do radia artysty';
+
+  @override
+  String get goToPlaylist => 'Przejdź do playlisty';
+
+  @override
+  String get goToSongRadio => 'Przejdź do radia utworu';
+
+  @override
+  String get home => 'Strona główna';
+
+  @override
+  String get myAwesomePlaylist => 'Moja świetna playlista';
+
+  @override
+  String get myPlaylist => 'Moja playlista';
+
+  @override
+  String get newPlaylist1 => 'Nowa playlista';
+
+  @override
+  String get play => 'Odtwórz';
+
+  @override
+  String get playStation => 'Odtwórz stację';
+
+  @override
+  String get playNext => 'Odtwórz następne';
+
+  @override
+  String get playlist => 'Playlista';
+
+  @override
+  String get playlistName => 'Nazwa playlisty';
+
+  @override
+  String get playlists1 => 'Playlisty';
+
+  @override
+  String get queue1 => 'Kolejka';
+
+  @override
+  String get queueNowPlaying => 'Teraz odtwarzane';
+
+  @override
+  String get queueUpNext => 'Następne';
+
+  @override
+  String get recentlyPlayed => 'Ostatnio odtwarzane';
+
+  @override
+  String get removeFromQueue => 'Usuń z kolejki';
+
+  @override
+  String get retry => 'Ponów';
+
+  @override
+  String get searchMusicArtistsAlbums => 'Szukaj muzyki, artystów, albumów...';
+
+  @override
+  String get share => 'Udostępnij';
+
+  @override
+  String featuringArtist(String artistName) {
+    return 'Z UDZIAŁEM $artistName';
+  }
+
+  @override
+  String currentCountry(String country) {
+    return 'Obecnie: $country';
+  }
+
+  @override
+  String get queueTooltip => 'Kolejka';
+
+  @override
+  String get searchHint => 'Szukaj muzyki, artystów, albumów...';
+
+  @override
+  String get language => 'Język';
+
+  @override
+  String get systemDefault => 'Domyślny systemowy';
+
+  @override
+  String get songsTab => 'Utwory';
+
+  @override
+  String get foldersTab => 'Foldery';
+
+  @override
+  String get artistsTab => 'Wykonawcy';
+
+  @override
+  String get albumsTab => 'Albumy';
+
+  @override
+  String get genresTab => 'Gatunki';
+
+  @override
+  String get noLocalGenres => 'No local genres found';
+
+  @override
+  String get playbackSpeed => 'Prędkość odtwarzania';
+
+  @override
+  String get addMusic => 'Dodaj muzykę';
+
+  @override
+  String get addFiles => 'Dodaj pliki';
+
+  @override
+  String get addFolder => 'Dodaj folder';
+
+  @override
+  String get rescanLibrary => 'Skanuj bibliotekę';
+
+  @override
+  String get sortTitle => 'Sortuj według tytułu';
+
+  @override
+  String get sortArtist => 'Sortuj według wykonawcy';
+
+  @override
+  String get sortAlbum => 'Sortuj według albumu';
+
+  @override
+  String get sortDuration => 'Sortuj według czasu';
+
+  @override
+  String get sortDateAdded => 'Sortuj według daty dodania';
+
+  @override
+  String get sortBy => 'Sortuj według';
+
+  @override
+  String get trackInformation => 'Informacje o utworze';
+
+  @override
+  String get removeFromLibrary => 'Usuń z biblioteki';
+
+  @override
+  String get showInFolder => 'Pokaż w folderze';
+
+  @override
+  String get unknownArtist => 'Nieznany wykonawca';
+
+  @override
+  String get unknownAlbum => 'Nieznany album';
+
+  @override
+  String get importedFiles => 'Zaimportowane pliki';
+
+  @override
+  String get playFolder => 'Odtwórz folder';
+
+  @override
+  String get shuffleFolder => 'Odtwarzaj folder losowo';
+
+  @override
+  String get playAll => 'Odtwórz wszystko';
+
+  @override
+  String get includeSubfolders => 'Uwzględnij podfoldery';
+
+  @override
+  String trackCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count utworów',
+      few: '$count utwory',
+      one: '1 utwór',
+      zero: '0 utworów',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get noLocalSongs => 'Nie znaleziono lokalnych utworów';
+
+  @override
+  String get searchLocalMusic => 'Szukaj lokalnej muzyki...';
+
+  @override
+  String get viewAsList => 'Widok listy';
+
+  @override
+  String get viewAsGrid => 'Widok siatki';
+
+  @override
+  String get trackInfoPath => 'Ścieżka';
+
+  @override
+  String get trackInfoFormat => 'Format';
+
+  @override
+  String get trackInfoDuration => 'Czas trwania';
+
+  @override
+  String get aboutDescription =>
+      'Darmowy odtwarzacz multimedialny typu open-source.';
+
+  @override
+  String get aboutApp => 'O PPPlayer';
+
+  @override
+  String get appTagline => 'Twoja muzyka. Na twój sposób.';
+
+  @override
+  String get exploreApp => 'Eksploruj PPPlayer';
+
+  @override
+  String get viewSource => 'Zobacz kod źródłowy';
+
+  @override
+  String get seeWhatsNew => 'Co nowego';
+
+  @override
+  String get getHelp => 'Uzyskaj pomoc';
+
+  @override
+  String versionInfo(Object version, Object build) {
+    return 'Wersja $version (Kompilacja $build)';
+  }
+
+  @override
+  String get createdBy => 'Stworzony przez Lucas Coelho';
+
+  @override
+  String get website => 'Strona internetowa';
+
+  @override
+  String get github => 'GitHub';
+
+  @override
+  String get releaseNotes => 'Informacje o wydaniu';
+
+  @override
+  String get support => 'Wsparcie';
+
+  @override
+  String get license => 'Licencja';
+
+  @override
+  String get acknowledgments => 'Podziękowania';
+
+  @override
+  String get close => 'Zamknij';
+
+  @override
+  String copyright(Object year) {
+    return '© $year Współtwórcy PPPlayer';
+  }
+
+  @override
+  String get goodMorning => 'Dzień dobry';
+
+  @override
+  String get goodAfternoon => 'Dzień dobry';
+
+  @override
+  String get goodEvening => 'Dobry wieczór';
+
+  @override
+  String greetingWithName(Object greeting, Object name) {
+    return '$greeting, $name';
+  }
+
+  @override
+  String get yourMusicIsWaiting => 'Twoja muzyka czeka.';
+
+  @override
+  String dailyMix(Object number) {
+    return 'Daily Mix $number';
+  }
+
+  @override
+  String get yourFavoritesAndNewDiscoveries =>
+      'Twoje ulubione\ni nowe odkrycia';
+
+  @override
+  String get discoverWeekly => 'Odkryj w tym tygodniu';
+
+  @override
+  String get releaseRadar => 'Radar premier';
+
+  @override
+  String get newMusicJustForYou => 'Nowa muzyka\ntylko dla Ciebie';
+
+  @override
+  String get chillMix => 'Chill Mix';
+
+  @override
+  String get relaxAndUnwind => 'Zrelaksuj się';
+
+  @override
+  String get focusMix => 'Focus Mix';
+
+  @override
+  String get deepFocusAndProductivity => 'Głębokie skupienie\ni produktywność';
+
+  @override
+  String artistRadio(Object artist) {
+    return 'Radio: $artist';
+  }
+
+  @override
+  String genreRadio(Object genre) {
+    return 'Radio: $genre';
+  }
+
+  @override
+  String get filterAll => 'Wszystko';
+
+  @override
+  String get filterPlaylists => 'Playlisty';
+
+  @override
+  String get filterArtists => 'Artyści';
+
+  @override
+  String get filterAlbums => 'Albumy';
+
+  @override
+  String get filterStations => 'Stacje';
+
+  @override
+  String get filterStreams => 'Strumienie';
+
+  @override
+  String get localMusicCard => 'Lokalna muzyka';
+
+  @override
+  String get createPlaylistButton => 'Utwórz playlistę';
+
+  @override
+  String get radioStations => 'Stacje radiowe';
+
+  @override
+  String get discoverMusic => 'Odkrywaj muzykę';
+
+  @override
+  String get importLocalMusic => 'Importuj lokalną muzykę';
+
+  @override
+  String get importAudioFiles => 'Importuj pliki audio';
+
+  @override
+  String get importFolder => 'Importuj folder';
+
+  @override
+  String get importFolderSubtitle => 'Wybierz folder zawierający pliki audio';
+
+  @override
+  String get importPlaylist => 'Importuj listę odtwarzania';
+
+  @override
+  String get importPlaylistSubtitle => 'Importuj plik .m3u lub .m3u8';
+
+  @override
+  String get exportPlaylist => 'Eksportuj listę odtwarzania';
+
+  @override
+  String get playbackErrorUnsupportedFormat =>
+      'Nieobsługiwany format lub uszkodzony plik';
+
+  @override
+  String get playbackErrorFileInaccessible =>
+      'Plik niedostępny lub nie znaleziony';
+
+  @override
+  String get localVideosCard => 'Lokalne wideo';
+
+  @override
+  String get noLocalVideos => 'Nie znaleziono wideo';
+
+  @override
+  String get searchLocalVideos => 'Szukaj lokalnych wideo';
+
+  @override
+  String get addVideos => 'Dodaj wideo';
+
+  @override
+  String get subtitles => 'Napisy';
+
+  @override
+  String get audioTracks => 'Ścieżki dźwiękowe';
+
+  @override
+  String get loadSubtitleFile => 'Załaduj plik napisów...';
+
+  @override
+  String errorLoadingSubtitle(String error) {
+    return 'Błąd podczas ładowania napisów: $error';
+  }
+
+  @override
+  String get off => 'Wyłączone';
+
+  @override
+  String get playOn => 'Odtwarzaj na';
+
+  @override
+  String get thisDevice => 'To urządzenie';
+
+  @override
+  String get availableDevices => 'Dostępne urządzenia';
+
+  @override
+  String get searchingDevices => 'Wyszukiwanie urządzeń…';
+
+  @override
+  String get refresh => 'Odśwież';
+
+  @override
+  String get connecting => 'Łączenie…';
+
+  @override
+  String connectingTo(String name) {
+    return 'Łączenie z $name…';
+  }
+
+  @override
+  String get connected => 'Połączono';
+
+  @override
+  String get unsupportedOutput =>
+      'Tego źródła nie można odtworzyć na tym wyjściu.';
+
+  @override
+  String get airPlayAudioOutput => 'AirPlay i wyjście audio';
+
+  @override
+  String get returnForAirPlay =>
+      'Odtwarzaj na tym urządzeniu, aby użyć AirPlay.';
+
+  @override
+  String get openSoundSettings =>
+      'Otwórz ustawienia dźwięku, aby wybrać wyjście.';
+
+  @override
+  String get soundSettingsError => 'Nie udało się otworzyć ustawień dźwięku.';
+
+  @override
+  String get systemOutput => 'Wyjście systemowe';
+
+  @override
+  String playingOn(String name) {
+    return 'Odtwarzanie na $name';
+  }
+
+  @override
+  String get chooseAirPlay =>
+      'Dotknij przycisku AirPlay, aby wybrać głośnik lub telewizor.';
+
+  @override
+  String get airPlayDevice => 'Urządzenie AirPlay';
+
+  @override
+  String get playOnIphone => 'Odtwarzaj na tym iPhonie';
+
+  @override
+  String get chooseIphone =>
+      'Wybierz tego iPhone’a przyciskiem AirPlay poniżej.';
+
+  @override
+  String get profile => 'Profil';
+
+  @override
+  String get preferences => 'Preferencje';
+
+  @override
+  String get themeColor => 'Kolor motywu';
+
+  @override
+  String get yourMusic => 'Twoja muzyka';
+
+  @override
+  String get apiCredentials => 'Dane dostępowe API';
+
+  @override
+  String get dataStorage => 'Dane i pamięć';
+
+  @override
+  String get editProfileHelp => 'Ustaw nazwę i awatar';
+
+  @override
+  String get customProvider => 'Własny dostawca';
+
+  @override
+  String get defaultProvider => 'Domyślny PPPlayer';
+
+  @override
+  String get proExperience => 'Tryb Pro aktywny';
+
+  @override
+  String get beta => 'Beta';
+
+  @override
+  String get loading => 'Wczytywanie…';
+
+  @override
+  String get unknown => 'Nieznane';
+
+  @override
+  String get pause => 'Pauza';
+
+  @override
+  String get repeat => 'Powtarzaj';
+
+  @override
+  String get mute => 'Wycisz';
+
+  @override
+  String get unmute => 'Włącz dźwięk';
+
+  @override
+  String get fitVideo => 'Dopasuj';
+
+  @override
+  String get fillVideo => 'Wypełnij';
+
+  @override
+  String get fullscreen => 'Pełny ekran';
+
+  @override
+  String get exitFullscreen => 'Wyjdź z pełnego ekranu';
+
+  @override
+  String get volume => 'Głośność';
+
+  @override
+  String get save => 'Zapisz';
+
+  @override
+  String get delete => 'Usuń';
+
+  @override
+  String get clear => 'Wyczyść';
+
+  @override
+  String get follow => 'Obserwuj';
+
+  @override
+  String get unfollow => 'Przestań obserwować';
+
+  @override
+  String get following => 'Obserwujesz';
+
+  @override
+  String get showAll => 'Pokaż wszystko';
+
+  @override
+  String get appearance => 'Wygląd';
+
+  @override
+  String get subtitleSize => 'Rozmiar';
+
+  @override
+  String get subtitleBackground => 'Tło';
+
+  @override
+  String get earlier => 'Wcześniej';
+
+  @override
+  String get later => 'Później';
+
+  @override
+  String get reset => 'Resetuj';
+
+  @override
+  String subtitleDelay(String seconds) {
+    return 'Opóźnienie: $seconds s';
+  }
+
+  @override
+  String get morePlaybackControls => 'Więcej opcji odtwarzania';
+
+  @override
+  String get hideVideo => 'Ukryj wideo';
+
+  @override
+  String get showVideo => 'Pokaż wideo';
+
+  @override
+  String get closeQueue => 'Zamknij kolejkę';
+
+  @override
+  String get enabled => 'Wł.';
+
+  @override
+  String get openFile => 'Otwórz plik…';
+
+  @override
+  String get openFolder => 'Otwórz folder…';
+
+  @override
+  String get openUrl => 'Otwórz URL…';
+
+  @override
+  String get fileMenu => 'Plik';
+
+  @override
+  String get viewMenu => 'Widok';
+
+  @override
+  String get windowMenu => 'Okno';
+
+  @override
+  String get saveChanges => 'Zapisz zmiany';
+
+  @override
+  String get themeAvatarColor => 'Kolor motywu i awatara';
+
+  @override
+  String get networkStreams => 'Strumienie sieciowe';
+
+  @override
+  String get networkStream => 'Strumień sieciowy';
+
+  @override
+  String get openNetworkStream => 'Otwórz strumień sieciowy';
+
+  @override
+  String get editPlaylist => 'Edytuj playlistę';
+
+  @override
+  String get editStreamItem => 'Edytuj element strumienia';
+
+  @override
+  String get streamUrl => 'URL strumienia';
+
+  @override
+  String get platformType => 'Platforma / typ';
+
+  @override
+  String get optionalTitle => 'Tytuł (opcjonalny)';
+
+  @override
+  String get optionalImageUrl => 'URL obrazu (opcjonalny)';
+
+  @override
+  String get myStream => 'Mój strumień';
+
+  @override
+  String get saveToLibrary => 'Zapisz w bibliotece';
+
+  @override
+  String get justPlay => 'Tylko odtwórz';
+
+  @override
+  String get autoDetect => 'Wykryj automatycznie';
+
+  @override
+  String get apiKeyRequired => 'Wymagany klucz API';
+
+  @override
+  String get customApiKey => 'Użyj własnego klucza API';
+
+  @override
+  String get clientId => 'Identyfikator klienta';
+
+  @override
+  String get clientSecret => 'Sekret klienta';
+
+  @override
+  String get saveCredentials => 'Zapisz dane dostępowe';
+
+  @override
+  String get searchStrategy => 'Strategia wyszukiwania';
+
+  @override
+  String get credentialsLocalOnly =>
+      'Bezpiecznie zapisane na tym urządzeniu. Nigdy nie są wysyłane do PPPlayer.';
+
+  @override
+  String get scrapingHelp =>
+      'Klucz API ani limit nie są wymagane. Może działać wolniej lub mniej niezawodnie.';
+
+  @override
+  String get streamHelp => 'Wprowadź URL HTTP(S) lub link do playlisty M3U.';
+
+  @override
+  String get deletePlaylistConfirm => 'Usunąć tę playlistę na stałe?';
+
+  @override
+  String get clearCacheConfirm =>
+      'Usunąć dane z pamięci podręcznej? Biblioteka i ulubione pozostaną bez zmian.';
+
+  @override
+  String get clearHistoryConfirm => 'Usunąć historię słuchania na stałe?';
+
+  @override
+  String get addedToQueue => 'Dodano do kolejki';
+
+  @override
+  String get addedVideo => 'Dodano wideo';
+
+  @override
+  String addedChannels(String count) {
+    return 'Dodane kanały: $count';
+  }
+
+  @override
+  String get removedFromPlaylist => 'Usunięto z playlisty';
+
+  @override
+  String get exportCancelled => 'Eksport anulowany';
+
+  @override
+  String exportComplete(String count) {
+    return 'Playlista wyeksportowana. Pominięte elementy: $count';
+  }
+
+  @override
+  String get playlistExported => 'Playlista wyeksportowana';
+
+  @override
+  String get live => 'Na żywo';
+
+  @override
+  String get sponsored => 'Sponsorowane';
+
+  @override
+  String get removeFromPlaylist => 'Usuń z playlisty';
+
+  @override
+  String get likedSongsHelp => 'Zapisz utwory, aby zobaczyć je tutaj';
+
+  @override
+  String get apiSingleVideoHint =>
+      'Możesz dodać to wideo bez importowania playlisty.';
+
+  @override
+  String get linkCopied => 'Link skopiowany';
+
+  @override
+  String get willPlayNext => 'Zostanie odtworzone jako następne';
+
+  @override
+  String get checkItOut => 'Sprawdź';
+
+  @override
+  String get loadFailed =>
+      'Nie udało się wczytać zawartości. Spróbuj ponownie.';
+
+  @override
+  String get removeFolder => 'Usuń folder';
+
+  @override
+  String get removeFolderConfirmTitle => 'Usunąć folder?';
+
+  @override
+  String removeFolderConfirmMessage(String name) {
+    return 'Usunąć „$name” i powiązane multimedia z biblioteki? Pliki na dysku nie zostaną usunięte.';
+  }
+
+  @override
+  String fileMissingOnDisk(String name) {
+    return 'Plik „$name” nie został znaleziony na dysku';
+  }
+
+  @override
+  String get folderUnavailable =>
+      'Folder jest niedostępny. Upewnij się, że dysk jest podłączony.';
+
+  @override
+  String fileAlreadyImported(String name) {
+    return '„$name” znajduje się już w bibliotece';
+  }
+
+  @override
+  String filesAlreadyImported(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count plików było już w bibliotece',
+      one: '1 plik był już w bibliotece',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get folderAlreadyImported =>
+      'Ten folder został już zaimportowany — sprawdzanie nowych plików';
+
+  @override
+  String get rescanCompleted => 'Zakończono ponowne skanowanie biblioteki';
+
+  @override
+  String rescanFailed(String error) {
+    return 'Nie udało się ponownie przeskanować folderu: $error';
+  }
+
+  @override
+  String get importedFolderFallback => 'Zaimportowany folder';
+}
