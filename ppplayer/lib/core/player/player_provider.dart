@@ -1,0 +1,1495 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:hive_ce/hive_ce.dart';
+import 'dart:io' show File, Platform;
+import '../local_library/local_file_resolver.dart'
+    show resolveSecurityScopedBookmark, stopAccessingSecurityScopedBookmark;
+import '../local_library/local_library_service.dart' show LocalLibraryService;
+import '../models/track.dart';
+import '../models/playback_queue.dart';
+import '../models/resolved_video_candidate.dart';
+import '../playback/playback_providers.dart';
+import '../playback/pip_handler.dart';
+import '../api/spotify_repository.dart';
+import '../api/ultratube_catalog.dart';
+import '../playback/ultratube_playback_controller.dart' show UltratubeResolveCache;
+import '../ultratube/ultratube_store.dart';
+import '../services/settings_provider.dart';
+import '../network_streams/network_stream_service.dart';
+import '../db/app_database.dart' show appDatabaseProvider;
+import 'package:ppplayer/l10n/app_localizations.dart';
+
+export '../models/track.dart' show Track, TrackSourceX;
+export '../models/playback_queue.dart' show PlaybackQueue, RepeatMode;
+
+class PlayerState {
+  const PlayerState({
+    this.playbackQueue = const PlaybackQueue(),
+    this.isPlaying = false,
+    this.videoId,
+    this.isLoadingVideo = false,
+    this.loadError,
+    this.position = Duration.zero,
+    this.duration = Duration.zero,
+    this.buffered = Duration.zero,
+    this.volume = 1.0,
+    this.speed = 1.0,
+    this.supportsSpeed = false,
+    this.isPipMode = false,
+    this.isPipRequestPending = false,
+    this.subtitleUri,
+    this.subtitleDelay = Duration.zero,
+  });
+
+  final PlaybackQueue playbackQueue;
+  final bool isPlaying;
+  final String? videoId;
+  final bool isLoadingVideo;
+  final String? loadError;
+  final Duration position;
+  final Duration duration;
+  final Duration buffered;
+  final double volume;
+  final double speed;
+  final bool supportsSpeed;
+  final bool isPipMode;
+  final bool isPipRequestPending;
+  final String? subtitleUri;
+  final Duration subtitleDelay;
+
+  // Shortcuts to avoid breaking UI that expects these on state
+  List<Track> get queue => playbackQueue.tracks;
+  int get currentIndex => playbackQueue.currentIndex;
+  RepeatMode get repeatMode => playbackQueue.repeatMode;
+  bool get isShuffled => playbackQueue.isShuffled;
+  Track? get currentTrack => playbackQueue.currentTrack;
+
+  PlayerState copyWith({
+    PlaybackQueue? playbackQueue,
+    bool? isPlaying,
+    Object? videoId = _sentinel,
+    bool? isLoadingVideo,
+    Object? loadError = _sentinel,
+    Duration? position,
+    Duration? duration,
+    Duration? buffered,
+    double? volume,
+    double? speed,
+    bool? supportsSpeed,
+    bool? isPipMode,
+    bool? isPipRequestPending,
+    Object? subtitleUri = _sentinel,
+    Duration? subtitleDelay,
+    bool clearLoadError = false,
+  }) {
+    return PlayerState(
+      playbackQueue: playbackQueue ?? this.playbackQueue,
+      isPlaying: isPlaying ?? this.isPlaying,
+      videoId: videoId == _sentinel ? this.videoId : videoId as String?,
+      isLoadingVideo: isLoadingVideo ?? this.isLoadingVideo,
+      loadError: clearLoadError
+          ? null
+          : (loadError == _sentinel ? this.loadError : loadError as String?),
+      position: position ?? this.position,
+      duration: duration ?? this.duration,
+      buffered: buffered ?? this.buffered,
+      volume: volume ?? this.volume,
+      speed: speed ?? this.speed,
+      supportsSpeed: supportsSpeed ?? this.supportsSpeed,
+      isPipMode: isPipMode ?? this.isPipMode,
+      isPipRequestPending: isPipRequestPending ?? this.isPipRequestPending,
+      subtitleUri: subtitleUri == _sentinel
+          ? this.subtitleUri
+          : subtitleUri as String?,
+      subtitleDelay: subtitleDelay ?? this.subtitleDelay,
+    );
+  }
+}
+
+const Object _sentinel = Object();
+
+class SeekRequest {
+  final Duration position;
+  final int generation;
+  SeekRequest({required this.position, required this.generation});
+}
+
+class PlayerNotifier extends Notifier<PlayerState> {
+  SeekRequest? _pendingSeek;
+  int _seekGeneration = 0;
+  bool _userIntentPlay = false;
+  DateTime? _startRequestedAt;
+
+  // Actual progress tracking
+  DateTime? _lastProgressTime;
+  Duration? _lastProgressPosition;
+
+  int _playbackGeneration = 0;
+  int _consecutiveTrackFailures = 0;
+
+  /// Live already given its one automatic retry (stream URLs/CDN nodes of a
+  /// broadcast can fail transiently; skipping to "up next" is a last resort).
+  String? _liveRetried;
+  List<ResolvedVideoCandidate> _currentCandidates = [];
+  int _currentCandidateIndex = 0;
+  bool _isRecovering = false;
+  // Identifies the playback whose `ended` event already advanced the queue, so
+  // duplicate ended emissions don't skip twice, while a genuinely new (even very
+  // short) track that ends right after still advances.
+  String? _lastAdvancedEndedKey;
+  bool _lastPipEnabled = false;
+  Timer? _saveTimer;
+  bool _disposed = false;
+  Future<void> _persistenceWork = Future.value();
+
+  /// Allows shutdown/tests to wait for already started disk operations.
+  Future<void> get persistenceSettled => _persistenceWork;
+  bool _prefetchedNextTrackForCurrentLoad = false;
+
+  bool _isFetchingAutoplay = false;
+  final Set<String> _autoplaySeenTrackIds = {};
+
+  /// True while the startup restore is cuing the saved track in the background.
+  /// External play commands (e.g. from macOS media session) are ignored during
+  /// this window to prevent auto-play on launch.
+  bool _restoringState = false;
+  Timer? _restoreTimeout;
+
+  @override
+  PlayerState build() {
+    _persistenceWork = _initRestore();
+    ref.onDispose(() {
+      _disposed = true;
+      _saveTimer?.cancel();
+      _restoreTimeout?.cancel();
+    });
+
+    // Listen to settings changes to apply subtitle appearance dynamically
+    ref.listen(settingsProvider, (previous, next) {
+      if (previous?.subtitleTextSize != next.subtitleTextSize ||
+          previous?.subtitleBackgroundColor != next.subtitleBackgroundColor) {
+        ref
+            .read(playbackControllerProvider)
+            .setSubtitleAppearance(
+              textSize: next.subtitleTextSize,
+              backgroundColor: next.subtitleBackgroundColor,
+            );
+      }
+    });
+
+    // Listen to the playback engine's status and sync it to our state
+    ref.listen(playbackStatusProvider, (previous, next) {
+      if (next is AsyncData<PlaybackStatus>) {
+        final status = next.value;
+        if (status.state == PlaybackState.ended) {
+          final endedKey = '${status.generation}:${status.track?.id}';
+          if (_lastAdvancedEndedKey != endedKey) {
+            _lastAdvancedEndedKey = endedKey;
+            skipNext();
+          }
+        }
+        _syncFromStatus(status);
+      }
+    });
+
+    PipHandler.addPipModeListener((isPipMode) {
+      state = state.copyWith(isPipMode: isPipMode);
+    });
+
+    PipHandler.addPipEntryRequestedListener(() {
+      state = state.copyWith(isPipRequestPending: true);
+    });
+
+    PipHandler.addPipEntryFailedListener(() {
+      state = state.copyWith(isPipRequestPending: false);
+    });
+
+    PipHandler.addActivityStoppedListener(() {
+      final status = ref.read(playbackStatusProvider).value;
+      final ts = DateTime.now().toIso8601String();
+      debugPrint(
+        '$ts PlayerNotifier: onActivityStopped '
+        'isPlaying=${state.isPlaying} isIFrameMode=${status?.isIFrameMode} '
+        'track=${state.currentTrack?.spotifyId}',
+      );
+      if (state.isPlaying && status?.isIFrameMode == true) {
+        if (!BackgroundPlaybackExperiment.enabled &&
+            defaultTargetPlatform != TargetPlatform.android) {
+          debugPrint(
+            '$ts PlayerNotifier: pausing via onActivityStopped (caller=lifecycle/lock-screen)',
+          );
+          _controller.pause(caller: 'onActivityStopped/lock-screen');
+          state = state.copyWith(isPlaying: false);
+        } else {
+          debugPrint(
+            '$ts PlayerNotifier: NOT pausing onActivityStopped (BackgroundPlaybackExperiment=${BackgroundPlaybackExperiment.enabled}, platform=$defaultTargetPlatform).',
+          );
+        }
+      }
+    });
+
+    ref.listen(settingsProvider, (previous, next) {
+      if (previous?.continuePlaybackInPip != next.continuePlaybackInPip) {
+        final status = ref.read(playbackStatusProvider).value;
+        final wantPip =
+            next.continuePlaybackInPip &&
+            state.isPlaying &&
+            (status?.hasVideo ?? false);
+        PipHandler.setPipEnabled(
+          wantPip,
+          aspectRatio: status?.videoAspectRatio ?? (16 / 9),
+        );
+      }
+    });
+
+    return const PlayerState();
+  }
+
+  void _syncFromStatus(PlaybackStatus status) {
+    if (_disposed) return;
+    String? displayError = status.error;
+
+    if (status.state == PlaybackState.error && status.error != null) {
+      final track = state.currentTrack;
+      final isNetworkStream = track?.isNetworkStream ?? false;
+
+      if (isNetworkStream) {
+        final err = status.error ?? '';
+        final errLower = err.toLowerCase();
+        final isPermanent =
+            errLower.contains('forbidden') ||
+            errLower.contains('403') ||
+            errLower.contains('404') ||
+            errLower.contains('not_found') ||
+            errLower.contains('unreachable') ||
+            errLower.contains('connection refused') ||
+            errLower.contains('file_inaccessible');
+
+        if (isPermanent) {
+          debugPrint(
+            'PlayerNotifier: Permanent network stream error detected ($err). Halting retry.',
+          );
+          state = state.copyWith(
+            loadError: err.isNotEmpty ? err : 'error:forbidden',
+            isLoadingVideo: false,
+          );
+          _isRecovering = false;
+          return;
+        }
+
+        debugPrint(
+          'PlayerNotifier: Network stream error detected. Refreshing stream...',
+        );
+        final fallbackPos = status.position == Duration.zero
+            ? state.position
+            : status.position;
+        _handleNetworkStreamFailure(fallbackPos, statusError: status.error);
+        return;
+      }
+
+      if (status.error!.startsWith('unavailable_media:') ||
+          status.error!.startsWith('error:')) {
+        _handleCandidateFailure();
+        return;
+      } else if (status.error!.startsWith('transient:')) {
+        return; // Ignore transient errors
+      }
+    }
+
+    // Handle actual playback progress tracking for failure resets
+    if (status.state == PlaybackState.playing) {
+      final now = DateTime.now();
+      if (_lastProgressTime == null || _lastProgressPosition == null) {
+        _lastProgressTime = now;
+        _lastProgressPosition = status.position;
+      } else {
+        final elapsed = now.difference(_lastProgressTime!);
+        final progress = (status.position - _lastProgressPosition!).abs();
+
+        // If actual progress > 3s AND elapsed time > 3s
+        if (elapsed > const Duration(seconds: 3) &&
+            progress > const Duration(seconds: 3)) {
+          if (_consecutiveTrackFailures > 0) {
+            debugPrint(
+              'PlayerNotifier: 3 seconds of actual progress achieved. Resetting failure counter.',
+            );
+            _consecutiveTrackFailures = 0;
+          }
+        }
+      }
+    } else if (status.state == PlaybackState.buffering ||
+        status.state == PlaybackState.error) {
+      // Reset tracking on interruptions
+      _lastProgressTime = null;
+      _lastProgressPosition = null;
+    }
+
+    // Clear pending seek if we reached the requested position
+    if (_pendingSeek != null && status.state != PlaybackState.error) {
+      final diff = (status.position - _pendingSeek!.position).abs();
+      if (diff <= const Duration(milliseconds: 500)) {
+        _pendingSeek = null;
+      }
+    }
+
+    // If recovering, only track elapsed time and intent; ignore most position/state updates until recovery completes.
+    if (_isRecovering) {
+      return;
+    }
+
+    if (status.state == PlaybackState.playing) {
+      _consecutiveTrackFailures = 0;
+      _isRecovering = false;
+    }
+
+    final isPlaying =
+        status.state == PlaybackState.playing ||
+        status.state == PlaybackState.buffering;
+    final pipEnabled = ref.read(settingsProvider).continuePlaybackInPip;
+    // Only call setPipEnabled when the desired state changes to avoid calling
+    // setPictureInPictureParams during non-foreground states (causes Android
+    // ensureValidPictureInPictureActivityParams to throw on Android 12+).
+    final wantPip = pipEnabled && isPlaying && status.hasVideo;
+    // We should also update PiP params if aspect ratio changes, but since Android 12
+    // requires this to be done only when the activity is foregrounded, we just pass it when wantPip changes.
+    // If we are currently playing a video and the aspect ratio changes, we might want to update it.
+    // Let's just pass the current aspect ratio.
+    if (wantPip != _lastPipEnabled) {
+      _lastPipEnabled = wantPip;
+      PipHandler.setPipEnabled(
+        wantPip,
+        aspectRatio: status.videoAspectRatio ?? (16 / 9),
+      );
+    }
+
+    // During 'preparing' the engine position/duration are always Duration.zero
+    // (no live reading yet). Overwriting state with zeros would erase the saved
+    // restore position and cause the wrong startAt on the next playTrack call.
+    // Only propagate live timeline data once the engine is past the load phase.
+    final hasLivePosition = status.state != PlaybackState.preparing;
+    // Only overwrite the restored duration once the engine reports an actual
+    // non-zero value. Right after cueVideoById() the IFrame emits
+    // PlaybackState.paused with duration=0 (it hasn't read the track length
+    // yet). Propagating that zero would overwrite the Hive-restored duration
+    // and make the seekbar show 0% (progress = savedPosition / 0).
+    final hasLiveDuration = hasLivePosition && status.duration > Duration.zero;
+    state = state.copyWith(
+      isPlaying: isPlaying,
+      isLoadingVideo:
+          status.state == PlaybackState.preparing ||
+          status.state == PlaybackState.buffering,
+      loadError: displayError,
+      videoId: status.activeVideoId,
+      position: hasLivePosition ? status.position : state.position,
+      duration: hasLiveDuration ? status.duration : state.duration,
+      buffered: hasLivePosition ? status.buffered : state.buffered,
+      speed: status.speed,
+      supportsSpeed: status.supportsSpeed,
+    );
+    _scheduleSaveState();
+
+    // Restore complete: the IFrame fired the cued event and the engine is now
+    // paused. Clear the restore guard so normal play commands are honoured.
+    if (_restoringState && status.state == PlaybackState.paused) {
+      debugPrint(
+        'PlayerNotifier: restore complete — guard cleared (engine paused)',
+      );
+      _restoringState = false;
+      _restoreTimeout?.cancel();
+    }
+
+    // Trigger prefetch once playback starts successfully
+    if (status.state == PlaybackState.playing &&
+        !_prefetchedNextTrackForCurrentLoad) {
+      _prefetchedNextTrackForCurrentLoad = true;
+      _prefetchNextTrack();
+    }
+  }
+
+  void _prefetchNextTrack() {
+    final queue = state.playbackQueue;
+    final nextIdx = queue.currentIndex + 1;
+    if (nextIdx < queue.tracks.length) {
+      final nextTrack = queue.tracks[nextIdx];
+      if (nextTrack.sourceType != TrackSourceType.online) return;
+      final ytId = nextTrack.youtubeVideoId;
+      if (ytId != null && nextTrack.spotifyId.contains(':')) {
+        // Resolve the next stream ahead of time so "up next" starts instantly.
+        UltratubeResolveCache.warm(
+          ytId,
+          video: ref.read(settingsProvider).showVideo,
+          maxHeight: ref.read(videoQualityProvider),
+        );
+        return;
+      }
+      ref.read(playbackServiceProvider).prefetchNext(nextTrack, null);
+    }
+  }
+
+  Future<void> _handleCandidateFailure() async {
+    if (_disposed || _isRecovering || _consecutiveTrackFailures >= 5) return;
+    _isRecovering = true;
+    final track = state.currentTrack;
+    if (track == null) {
+      _isRecovering = false;
+      return;
+    }
+    final generation = _playbackGeneration;
+
+    if (track.liveStatus == StreamLiveStatus.live && _liveRetried != track.spotifyId) {
+      _liveRetried = track.spotifyId;
+      debugPrint('PlayerNotifier: live ${track.spotifyId} failed; retrying once.');
+      final id = track.youtubeVideoId;
+      if (id != null) UltratubeResolveCache.forget(id);
+      _isRecovering = false;
+      await retryLoad();
+      return;
+    }
+
+    debugPrint(
+      'PlayerNotifier: Candidate ${track.youtubeVideoId} failed. Trying next candidate.',
+    );
+
+    _currentCandidateIndex++;
+    if (_currentCandidateIndex < _currentCandidates.length) {
+      await _attemptCurrentCandidate(
+        _playbackGeneration,
+        track,
+        List<Track>.from(state.playbackQueue.tracks),
+      );
+    } else {
+      await _controller.stop();
+      if (_disposed || generation != _playbackGeneration) return;
+      _handleLogicalTrackFailure('Playback failed for all available sources');
+    }
+    if (!_disposed && generation == _playbackGeneration) _isRecovering = false;
+  }
+
+  /// True when [track] is a local file whose backing file no longer exists.
+  /// Conservative: returns false whenever existence can't be determined.
+  Future<bool> _isLocalFileMissing(Track track) async {
+    if (!track.isLocal) return false;
+    final path = track.localFilePath;
+    if (path == null || path.isEmpty) return false;
+    try {
+      if (path.startsWith('/') || RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path)) {
+        // iOS sandbox paths can't be probed without a security-scoped lease.
+        if (Platform.isIOS) return false;
+        if (Platform.isMacOS) {
+          final db = ref.read(appDatabaseProvider);
+          final rootLocator = await db.importRootLocatorForPath(path);
+          if (rootLocator != null) {
+            final rootPath = await resolveSecurityScopedBookmark(rootLocator);
+            if (rootPath == null) {
+              // The folder bookmark could not be resolved (e.g. drive unplugged).
+              // Conservative: return false so we don't treat temporarily inaccessible drives as deleted.
+              return false;
+            }
+            try {
+              return !await File(path).exists();
+            } finally {
+              await stopAccessingSecurityScopedBookmark(rootLocator);
+            }
+          }
+        }
+        return !await File(path).exists();
+      }
+      if (path.contains('://')) return false; // pp-local://, content://, etc.
+      if (Platform.isIOS || Platform.isMacOS) {
+        // Bare string => base64 security-scoped bookmark.
+        final resolved = await resolveSecurityScopedBookmark(path);
+        if (resolved == null) return false;
+        try {
+          return !await File(resolved).exists();
+        } finally {
+          await stopAccessingSecurityScopedBookmark(path);
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  void _handleLogicalTrackFailure([String? specificError]) {
+    _consecutiveTrackFailures++;
+
+    if (_consecutiveTrackFailures < 5) {
+      if (specificError != null) {
+        state = state.copyWith(loadError: specificError);
+      }
+      debugPrint(
+        'PlayerNotifier: Track exhausted. Auto-skipping to next (failure count: $_consecutiveTrackFailures)',
+      );
+
+      var queue = state.playbackQueue;
+      if (queue.repeatMode == RepeatMode.one) {
+        queue = queue.copyWith(repeatMode: RepeatMode.all);
+      }
+
+      final nextQueue = queue.next();
+      if (nextQueue.currentIndex < nextQueue.tracks.length) {
+        final nextTrack = nextQueue.tracks[nextQueue.currentIndex];
+        playTrack(nextTrack, queue: nextQueue.tracks, isRetry: true);
+      } else {
+        state = state.copyWith(
+          loadError: specificError ?? 'Queue ended after consecutive failures.',
+          isLoadingVideo: false,
+        );
+      }
+    } else {
+      state = state.copyWith(
+        loadError:
+            specificError ??
+            'Excessive consecutive track failures. Playback stopped.',
+        isLoadingVideo: false,
+      );
+      debugPrint(
+        'PlayerNotifier: Stopped due to excessive consecutive failures.',
+      );
+    }
+  }
+
+  void _scheduleSaveState() {
+    if (_saveTimer?.isActive ?? false) return;
+    if (_disposed) return;
+    _saveTimer = Timer(const Duration(seconds: 2), () {
+      _persistenceWork = _saveState();
+    });
+  }
+
+  Future<void> _saveState() async {
+    try {
+      if (_disposed) return;
+      final snapshot = state;
+      final box = await Hive.openBox('player_state');
+      if (_disposed) return;
+      await box.put('queue', jsonEncode(snapshot.playbackQueue.toJson()));
+      await box.put('positionMs', snapshot.position.inMilliseconds);
+      await box.put('durationMs', snapshot.duration.inMilliseconds);
+    } catch (e) {
+      debugPrint('Failed to save player state: $e');
+    }
+  }
+
+  Future<void> _initRestore() async {
+    final generation = _playbackGeneration;
+    try {
+      final box = await Hive.openBox('player_state');
+      if (_disposed || generation != _playbackGeneration) return;
+      final queueJson = box.get('queue');
+      final posMs = box.get('positionMs');
+
+      if (queueJson != null) {
+        final queue = PlaybackQueue.fromJson(jsonDecode(queueJson));
+        final position = Duration(milliseconds: posMs ?? 0);
+        final durMs = box.get('durationMs');
+        final duration = durMs != null && durMs > 0
+            ? Duration(milliseconds: durMs)
+            : (queue.currentTrack?.durationMs != null &&
+                  queue.currentTrack!.durationMs! > 0)
+            ? Duration(milliseconds: queue.currentTrack!.durationMs!)
+            : Duration.zero;
+
+        state = state.copyWith(
+          playbackQueue: queue,
+          position: position,
+          duration: duration,
+          isPlaying: false,
+        );
+
+        // Cue the video silently so the IFrame shows the paused frame.
+        // _restoringState blocks macOS from auto-playing via the AudioHandler.
+        _restoringState = true;
+        unawaited(_prepareRestoredTrack(position));
+      }
+    } catch (e) {
+      debugPrint('Failed to restore player state: $e');
+    }
+  }
+
+  /// Cues the restored track at [savedPosition] without starting audio.
+  /// Runs after startup; sets _restoringState=false when done so
+  /// external play commands from macOS are honoured again.
+  Future<void> _prepareRestoredTrack(Duration savedPosition) async {
+    final track = state.currentTrack;
+    if (track == null) {
+      _restoringState = false;
+      return;
+    }
+
+    _playbackGeneration++;
+    final myGen = _playbackGeneration;
+
+    try {
+      final service = ref.read(playbackServiceProvider);
+      Track resolvedTrack = track;
+
+      if (!track.isLocal && !track.isNetworkStream) {
+        final candidates = await service.resolveCandidates(track, null);
+        if (_disposed || myGen != _playbackGeneration) {
+          _restoringState = false;
+          return;
+        }
+
+        if (candidates.isEmpty) {
+          _restoringState = false;
+          return;
+        }
+
+        final candidate = candidates.first;
+        resolvedTrack = track.copyWith(youtubeVideoId: candidate.videoId);
+        await service.cacheYoutubeId(
+          resolvedTrack.spotifyId,
+          candidate.videoId,
+        );
+        if (_disposed || myGen != _playbackGeneration) {
+          _restoringState = false;
+          return;
+        }
+      }
+
+      // Update queue entry with resolved video ID.
+      final newQueue = List<Track>.from(state.playbackQueue.tracks);
+      final idx = state.playbackQueue.currentIndex;
+      if (idx >= 0 && idx < newQueue.length) {
+        newQueue[idx] = resolvedTrack;
+        state = state.copyWith(
+          playbackQueue: state.playbackQueue.copyWith(tracks: newQueue),
+        );
+      }
+
+      // Cue video silently (no audio). Sets intendedState=paused in engine.
+      await _controller.prepare(
+        resolvedTrack.toPlaybackTrack(),
+        position: savedPosition,
+      );
+      if (_disposed || myGen != _playbackGeneration) {
+        _clearRestoreGuard();
+        return;
+      }
+      _controller.setVolume(state.volume);
+      // _restoringState stays true here — _syncFromStatus will clear it when
+      // the engine reaches PlaybackState.paused (IFrame fired the cued event).
+      // _restoreTimeout is a safety net in case the cued event never fires.
+      _restoreTimeout?.cancel();
+      _restoreTimeout = Timer(const Duration(seconds: 10), _clearRestoreGuard);
+    } catch (e) {
+      debugPrint('PlayerNotifier: _prepareRestoredTrack failed: $e');
+      _clearRestoreGuard();
+    }
+  }
+
+  void _clearRestoreGuard() {
+    if (_restoringState) {
+      debugPrint('PlayerNotifier: restore guard cleared');
+      _restoringState = false;
+    }
+    _restoreTimeout?.cancel();
+    _restoreTimeout = null;
+  }
+
+  PlaybackController get _controller => ref.read(playbackControllerProvider);
+  PlaybackTrack? get currentPlaybackTrack => _controller.currentStatus.track;
+
+  Future<void> playTrack(
+    Track track, {
+    List<Track>? queue,
+    bool isRetry = false,
+    String? contextArtistId,
+    Duration? position,
+    int? queueIndex,
+  }) async {
+    if (!isRetry) {
+      _prefetchedNextTrackForCurrentLoad = false;
+      if (queue != null) {
+        _autoplaySeenTrackIds.clear();
+      }
+      _consecutiveTrackFailures = 0;
+      // A user-initiated play always means "start audible playback"; without
+      // this local/network tracks would load paused if the user never pressed
+      // play before.
+      _userIntentPlay = true;
+      _startRequestedAt = DateTime.now();
+    }
+    _playbackGeneration++;
+    final myGen = _playbackGeneration;
+    _isRecovering = false;
+
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+
+    final q = (queue ?? [track]).asMap().entries.map((e) {
+      final t = e.value;
+      if (t.queueItemId != null) return t;
+      return t.copyWith(queueItemId: '${t.spotifyId}_${timestamp}_${e.key}');
+    }).toList();
+
+    int idx = 0;
+    Track targetTrack;
+    if (queueIndex != null && queueIndex >= 0 && queueIndex < q.length) {
+      idx = queueIndex;
+      targetTrack = q[idx];
+    } else {
+      targetTrack = q.firstWhere((t) {
+        if (track.queueItemId != null && t.queueItemId != null) {
+          return t.queueItemId == track.queueItemId;
+        }
+        return t.spotifyId == track.spotifyId && t.name == track.name;
+      }, orElse: () => q.first);
+      idx = q.indexOf(targetTrack);
+    }
+
+    debugPrint('PlayerNotifier: Resolving track ${track.name}');
+
+    state = state.copyWith(
+      playbackQueue: state.playbackQueue.copyWith(
+        tracks: q,
+        currentIndex: idx < 0 ? 0 : idx,
+        contextArtistId:
+            contextArtistId ??
+            (queue != null ? null : state.playbackQueue.contextArtistId),
+      ),
+      clearLoadError: true,
+      isLoadingVideo: true,
+      videoId: null,
+      position: Duration.zero,
+      duration: Duration.zero,
+      buffered: Duration.zero,
+      subtitleUri: null,
+      subtitleDelay: Duration.zero,
+    );
+    _scheduleSaveState();
+    _evaluateAutoplay();
+
+    try {
+      final service = ref.read(playbackServiceProvider);
+
+      if (targetTrack.isLocal || targetTrack.isNetworkStream) {
+        if (_disposed || myGen != _playbackGeneration) return;
+
+        var resolvedTrack = targetTrack;
+        Map<String, String>? resolvedHeaders;
+        if (resolvedTrack.sourceType == TrackSourceType.networkStream &&
+            resolvedTrack.networkStreamUrl != null) {
+          final extracted = await ref
+              .read(networkStreamServiceProvider)
+              .extractDirectStreamUrl(resolvedTrack.networkStreamUrl!);
+          if (extracted != null) {
+            resolvedTrack = resolvedTrack.copyWith(
+              networkStreamUrl: extracted.url,
+            );
+            resolvedHeaders = extracted.httpHeaders;
+          }
+        }
+
+        if (await _isLocalFileMissing(resolvedTrack)) {
+          if (_disposed || myGen != _playbackGeneration) return;
+          await _controller.stop();
+          if (_disposed || myGen != _playbackGeneration) return;
+          final context = LocalLibraryService.messengerKey.currentContext;
+          final l10n = (context != null && context.mounted)
+              ? AppLocalizations.of(context)
+              : null;
+          final msg =
+              l10n?.fileMissingOnDisk(resolvedTrack.name) ??
+              '"${resolvedTrack.name}" can no longer be found on disk';
+          LocalLibraryService.showNotice(msg);
+          _handleLogicalTrackFailure(msg);
+          return;
+        }
+
+        await _controller.stop();
+        if (_disposed || myGen != _playbackGeneration) return;
+
+        state = state.copyWith(
+          isLoadingVideo: true,
+          subtitleUri: null, // Clear subtitles when a new track plays
+        );
+
+        final actualStartAt =
+            _pendingSeek?.position ?? position ?? Duration.zero;
+        if (_pendingSeek != null) {
+          debugPrint(
+            'PlayerNotifier: Applying pending seek during load: ${_pendingSeek!.position}',
+          );
+        }
+
+        await _controller.play(
+          resolvedTrack.toPlaybackTrack(httpHeaders: resolvedHeaders),
+          startAt: actualStartAt,
+          play: _userIntentPlay,
+        );
+
+        if (_disposed || myGen != _playbackGeneration) return;
+        _controller.setVolume(state.volume);
+        if (_controller.supportsSubtitleDelay) {
+          _controller.setSubtitleDelay(Duration.zero);
+        }
+        _controller.setSubtitleAppearance(
+          textSize: ref.read(settingsProvider).subtitleTextSize,
+          backgroundColor: ref.read(settingsProvider).subtitleBackgroundColor,
+        );
+        if (_controller.supportsSpeed) {
+          _controller.setSpeed(state.speed);
+        } else if (state.speed != 1.0) {
+          state = state.copyWith(speed: 1.0);
+        }
+        await service.recordPlay(targetTrack);
+        return;
+      }
+
+      final candidates = await service.resolveCandidates(targetTrack, null);
+
+      if (_disposed || myGen != _playbackGeneration) return;
+
+      if (candidates.isNotEmpty) {
+        _currentCandidates = candidates;
+        _currentCandidateIndex = 0;
+        await _attemptCurrentCandidate(
+          myGen,
+          targetTrack,
+          q,
+          position: position,
+        );
+      } else {
+        await _controller.stop();
+        if (_disposed || myGen != _playbackGeneration) return;
+        _handleLogicalTrackFailure('No YouTube video found for this track');
+        return;
+      }
+    } catch (e) {
+      if (_disposed || myGen != _playbackGeneration) return;
+      debugPrint('Failed to resolve track ${targetTrack.name}: $e');
+      await _controller.stop();
+      if (_disposed || myGen != _playbackGeneration) return;
+      final errorMessage = e.toString().contains('Exception:')
+          ? e.toString().split('Exception: ').last
+          : 'Failed to resolve track playback URL';
+      _handleLogicalTrackFailure(errorMessage);
+      return;
+    }
+  }
+
+  Future<void> _attemptCurrentCandidate(
+    int myGen,
+    Track track,
+    List<Track> queue, {
+    Duration? position,
+  }) async {
+    final candidate = _currentCandidates[_currentCandidateIndex];
+    final service = ref.read(playbackServiceProvider);
+
+    if (_disposed || myGen != _playbackGeneration) return;
+
+    final newTrack = track.copyWith(youtubeVideoId: candidate.videoId);
+    await service.cacheYoutubeId(newTrack.spotifyId, candidate.videoId);
+    if (_disposed || myGen != _playbackGeneration) return;
+
+    final newQueue = List<Track>.from(state.playbackQueue.tracks);
+    final idx = state.playbackQueue.currentIndex;
+    if (idx >= 0 && idx < newQueue.length) {
+      newQueue[idx] = newTrack;
+      state = state.copyWith(
+        playbackQueue: state.playbackQueue.copyWith(tracks: newQueue),
+        isLoadingVideo: true,
+        subtitleUri: null, // Clear subtitles on manual track transition
+      );
+    }
+
+    if (_currentCandidateIndex > 0) {
+      state = state.copyWith(loadError: 'Trying another source...');
+    } else {
+      state = state.copyWith(clearLoadError: true);
+    }
+
+    await _controller.stop();
+    if (_disposed || myGen != _playbackGeneration) return;
+
+    await _controller.play(
+      newTrack.toPlaybackTrack(),
+      startAt: position ?? Duration.zero,
+    );
+    if (_disposed || myGen != _playbackGeneration) return;
+    _controller.setVolume(state.volume);
+    if (_controller.supportsSubtitleDelay) {
+      _controller.setSubtitleDelay(Duration.zero);
+    }
+    _controller.setSubtitleAppearance(
+      textSize: ref.read(settingsProvider).subtitleTextSize,
+      backgroundColor: ref.read(settingsProvider).subtitleBackgroundColor,
+    );
+    if (_controller.supportsSpeed) {
+      _controller.setSpeed(state.speed);
+    } else if (state.speed != 1.0) {
+      state = state.copyWith(speed: 1.0);
+    }
+
+    await service.recordPlay(newTrack);
+  }
+
+  Future<void> playTracks(
+    List<Track> tracks, {
+    int initialIndex = 0,
+    String? contextArtistId,
+  }) async {
+    if (tracks.isEmpty) return;
+    final track = (initialIndex >= 0 && initialIndex < tracks.length)
+        ? tracks[initialIndex]
+        : tracks.first;
+    await playTrack(track, queue: tracks, contextArtistId: contextArtistId);
+  }
+
+  Future<void> shuffleAndPlay(
+    List<Track> tracks, {
+    String? contextArtistId,
+  }) async {
+    if (tracks.isEmpty) return;
+    final shuffled = [...tracks]..shuffle();
+    state = state.copyWith(
+      playbackQueue: state.playbackQueue.copyWith(
+        tracks: shuffled,
+        currentIndex: 0,
+        isShuffled: true,
+        contextArtistId: contextArtistId,
+      ),
+    );
+    await playTrack(
+      shuffled.first,
+      queue: shuffled,
+      contextArtistId: contextArtistId,
+    );
+  }
+
+  Future<void> playPlaylist(int playlistId) async {
+    final tracks = await ref
+        .read(playbackServiceProvider)
+        .getPlaylistTracks(playlistId);
+    if (tracks.isNotEmpty) {
+      await playTracks(tracks);
+    }
+  }
+
+  Future<void> playRadio(String artistId) async {
+    final tracks = await ref
+        .read(playbackServiceProvider)
+        .getRadioTracks(artistId);
+    if (tracks.isNotEmpty) {
+      await playTrack(tracks.first, queue: tracks);
+    }
+  }
+
+  Future<void> retryLoad() async {
+    final track = state.currentTrack;
+    if (track == null) return;
+    // Delegate to the full validated playTrack flow. This ensures:
+    //  - YoutubeIdValidator is applied (null/invalid ID → fresh resolution)
+    //  - _playGeneration is incremented (stale retry cannot overwrite a newer selection)
+    //  - loadError is cleared before the attempt
+    // Do NOT call _controller.play() directly here — that bypasses validation.
+    await playTrack(track, queue: state.playbackQueue.tracks);
+  }
+
+  Future<void> pause() async {
+    _userIntentPlay = false;
+    _startRequestedAt = null;
+    await _controller.pause();
+  }
+
+  Future<void> resume() async {
+    _userIntentPlay = true;
+    // Block system-initiated play commands (e.g. macOS media session) while
+    // the startup restore is cuing the video. _restoringState is cleared by
+    // _prepareRestoredTrack once the IFrame is ready (or on failure).
+    if (_restoringState) {
+      debugPrint('PlayerNotifier: resume() blocked — restore in progress');
+      return;
+    }
+    final engineState = _controller.currentStatus.state;
+    // Route to _resumeRestoredState if the engine is idle (never started) OR
+    // still preparing (prepare() was called but hasn't cued yet). In both
+    // cases _controller.resume() alone cannot start playback.
+    if (state.currentTrack != null &&
+        (engineState == PlaybackState.idle ||
+            engineState == PlaybackState.preparing)) {
+      await _resumeRestoredState();
+    } else {
+      await _controller.resume();
+    }
+  }
+
+  Future<void> _resumeRestoredState() async {
+    final track = state.currentTrack;
+    if (track == null) return;
+
+    // Fast-path: the startup prepare() already cued the video.
+    // _controller.resume() calls playVideo() directly — instant audio start.
+    final engineState = _controller.currentStatus.state;
+    if (engineState == PlaybackState.paused) {
+      if (track.isLocal) {
+        // media_kit loses the initial cued seek position on resume().
+        await _controller.play(
+          track.toPlaybackTrack(),
+          startAt: state.position,
+        );
+      } else {
+        await _controller.resume();
+      }
+      return;
+    }
+
+    // Fallback: engine is idle or still loading — run the full playTrack flow.
+    // state.position is always correct here because _syncFromStatus(preparing)
+    // no longer overwrites it with Duration.zero.
+    final position = state.position;
+    final generation = _playbackGeneration;
+    await playTrack(
+      track,
+      queue: state.playbackQueue.tracks,
+      position: position,
+    );
+    if (_disposed || generation != _playbackGeneration) return;
+  }
+
+  void togglePlay() {
+    if (state.isPlaying) {
+      pause();
+    } else {
+      // User explicitly tapping play always clears the restore guard so the
+      // action is never silently swallowed (unlike macOS auto-commands).
+      _clearRestoreGuard();
+      resume();
+    }
+  }
+
+  void skipNext() {
+    final nextQueue = state.playbackQueue.next();
+    final current = state.currentTrack;
+    final atEnd =
+        nextQueue.currentIndex >= nextQueue.tracks.length ||
+        nextQueue.currentIndex == state.playbackQueue.currentIndex;
+    if (atEnd &&
+        state.repeatMode == RepeatMode.none &&
+        current != null &&
+        current.spotifyId.startsWith('youtube:')) {
+      // Queue ran out: fetch YouTube's "up next" and actually play it.
+      unawaited(_continueWithRelated(current));
+      return;
+    }
+    if (nextQueue.currentIndex < nextQueue.tracks.length) {
+      final track = nextQueue.tracks[nextQueue.currentIndex];
+      playTrack(
+        track,
+        queue: nextQueue.tracks,
+        queueIndex: nextQueue.currentIndex,
+      );
+    }
+
+    // Evaluate autoplay if we didn't play a track but still advanced
+    _evaluateAutoplay();
+  }
+
+  void skipPrevious() {
+    final prevQueue = state.playbackQueue.previous(state.position);
+    final track = prevQueue.tracks[prevQueue.currentIndex];
+    playTrack(
+      track,
+      queue: prevQueue.tracks,
+      queueIndex: prevQueue.currentIndex,
+    );
+  }
+
+  /// Handles a tap on a track row. Returns true if [track] is the current
+  /// track and the tap was fully handled here (resume if paused, no-op if
+  /// already playing/starting); false if the caller should start the track.
+  /// Uses engine-synced state only.
+  bool handleTapOnCurrentTrack(Track track) {
+    final current = state.currentTrack;
+    if (current == null || !_isSameTrack(current, track)) return false;
+    // Errored track: let the caller restart it fully.
+    if (state.loadError != null) return false;
+    if (state.isPlaying) return true;
+    final startedAt = _startRequestedAt;
+    final startPending =
+        startedAt != null &&
+        DateTime.now().difference(startedAt) < const Duration(seconds: 2);
+    if (state.isLoadingVideo || startPending) return true;
+    _clearRestoreGuard();
+    resume();
+    return true;
+  }
+
+  static bool _isSameTrack(Track a, Track b) {
+    if (a.queueItemId != null &&
+        b.queueItemId != null &&
+        a.queueItemId == b.queueItemId) {
+      return true;
+    }
+    if (a.spotifyId.isEmpty || b.spotifyId.isEmpty) return false;
+    return a.spotifyId == b.spotifyId;
+  }
+
+  void skipTo(int index) {
+    if (index >= 0 && index < state.playbackQueue.tracks.length) {
+      if (index == state.playbackQueue.currentIndex &&
+          handleTapOnCurrentTrack(state.playbackQueue.tracks[index])) {
+        return;
+      }
+      playTrack(
+        state.playbackQueue.tracks[index],
+        queue: state.playbackQueue.tracks,
+        queueIndex: index,
+      );
+    }
+  }
+
+  void addToQueue(Track track) {
+    final t = track.copyWith(queueOrigin: QueueItemOrigin.user);
+    state = state.copyWith(playbackQueue: state.playbackQueue.add(t));
+    _scheduleSaveState();
+    _evaluateAutoplay();
+  }
+
+  void addTracksToQueue(List<Track> tracks) {
+    var q = state.playbackQueue;
+    for (final track in tracks) {
+      q = q.add(track.copyWith(queueOrigin: QueueItemOrigin.user));
+    }
+    state = state.copyWith(playbackQueue: q);
+    _scheduleSaveState();
+    _evaluateAutoplay();
+  }
+
+  void playNext(Track track) {
+    final t = track.copyWith(queueOrigin: QueueItemOrigin.user);
+    state = state.copyWith(playbackQueue: state.playbackQueue.insertNext(t));
+    _scheduleSaveState();
+    _evaluateAutoplay();
+  }
+
+  /// Drops everything after the current item (YouTube "clear queue").
+  void clearUpcoming() {
+    final q = state.playbackQueue;
+    if (q.tracks.isEmpty) return;
+    state = state.copyWith(
+      playbackQueue: q.copyWith(tracks: q.tracks.sublist(0, (q.currentIndex + 1).clamp(0, q.tracks.length))),
+    );
+    _scheduleSaveState();
+  }
+
+  void removeFromQueue(int index) {
+    state = state.copyWith(playbackQueue: state.playbackQueue.removeAt(index));
+    _scheduleSaveState();
+    _evaluateAutoplay();
+  }
+
+  void toggleShuffle() {
+    state = state.copyWith(
+      playbackQueue: state.playbackQueue.copyWith(
+        isShuffled: !state.playbackQueue.isShuffled,
+      ),
+    );
+    _scheduleSaveState();
+  }
+
+  void reorderQueue(int oldIndex, int newIndex) {
+    state = state.copyWith(
+      playbackQueue: state.playbackQueue.reorder(oldIndex, newIndex),
+    );
+    _scheduleSaveState();
+    _evaluateAutoplay();
+  }
+
+  Future<void> cycleRepeat() async {
+    final nextMode = RepeatMode
+        .values[(state.repeatMode.index + 1) % RepeatMode.values.length];
+    state = state.copyWith(
+      playbackQueue: state.playbackQueue.copyWith(repeatMode: nextMode),
+    );
+    _scheduleSaveState();
+  }
+
+  Future<void> setVolume(double volume) async {
+    state = state.copyWith(volume: volume);
+    await _controller.setVolume(volume);
+  }
+
+  Future<void> seekTo(Duration position) async {
+    _seekGeneration++;
+    _pendingSeek = SeekRequest(position: position, generation: _seekGeneration);
+    await _controller.seekTo(position);
+  }
+
+  Future<void> setSpeed(double speed) async {
+    if (!_controller.supportsSpeed) return;
+    state = state.copyWith(speed: speed);
+    await _controller.setSpeed(speed);
+  }
+
+  Future<void> setSubtitleTrack(String? uri) async {
+    state = state.copyWith(subtitleUri: uri);
+    await _controller.setSubtitleTrack(uri);
+    _scheduleSaveState();
+  }
+
+  Future<void> setSubtitleDelay(Duration delay) async {
+    state = state.copyWith(subtitleDelay: delay);
+    await _controller.setSubtitleDelay(delay);
+    // Do not save delay as a global preference or persistent state.
+  }
+
+  Future<void> toggleFavorite(Track track) async {
+    final newValue = !track.isFavorite;
+    await ref.read(playbackServiceProvider).toggleFavorite(track, newValue);
+
+    final newQueue = state.queue.map((t) {
+      if (t.spotifyId == track.spotifyId) {
+        return t.copyWith(isFavorite: newValue);
+      }
+      return t;
+    }).toList();
+
+    state = state.copyWith(
+      playbackQueue: state.playbackQueue.copyWith(tracks: newQueue),
+    );
+    _scheduleSaveState();
+  }
+
+  Future<void> _evaluateAutoplay() async {
+    final currentId = state.currentTrack?.spotifyId ?? '';
+    // Shorts never start recommendations.
+    if (currentId.startsWith('short:')) return;
+    // YouTube identifiers are not Spotify seeds: continue with YouTube's own
+    // "up next" items when the queue is about to run out.
+    if (currentId.startsWith('youtube:')) return _evaluateYoutubeAutoplay();
+    final settings = ref.read(settingsProvider);
+    if (!settings.autoplayEnabled) return;
+    if (state.repeatMode != RepeatMode.none) return;
+    if (_isFetchingAutoplay) return;
+
+    final queue = state.playbackQueue;
+    if (queue.tracks.isEmpty) return;
+
+    final remainingAfterCurrent = queue.tracks.length - queue.currentIndex - 1;
+    if (remainingAfterCurrent > 15) return;
+
+    final currentTrack = queue.currentTrack;
+    if (currentTrack == null) return;
+
+    if (currentTrack.isLocal || currentTrack.isNetworkStream) {
+      return; // Autoplay feature requires online context
+    }
+
+    _isFetchingAutoplay = true;
+    try {
+      final spotifyRepo = ref.read(spotifyRepositoryProvider);
+
+      String? seedArtistId = queue.contextArtistId;
+
+      if (seedArtistId == null) {
+        final contextTracks = queue.tracks
+            .where((t) => t.queueOrigin != QueueItemOrigin.autoplay)
+            .toList();
+        if (contextTracks.length >= 2) {
+          final artistCounts = <String, int>{};
+          for (final t in contextTracks) {
+            final aId = t.artistId.split(',').first;
+            if (aId.isNotEmpty) {
+              artistCounts[aId] = (artistCounts[aId] ?? 0) + 1;
+            }
+          }
+          if (artistCounts.isNotEmpty) {
+            final dominant = artistCounts.entries.reduce(
+              (a, b) => a.value > b.value ? a : b,
+            );
+            if (dominant.value > contextTracks.length / 2) {
+              seedArtistId = dominant.key;
+            }
+          }
+        }
+      }
+
+      final cacheResult = await spotifyRepo
+          .watchRecommendations(
+            seedArtistId: seedArtistId,
+            seedTrackId: currentTrack.spotifyId,
+            limit: 30,
+          )
+          .first;
+      final candidates = cacheResult.data;
+
+      final queueIds = queue.tracks.map((t) => t.spotifyId).toSet();
+      final newTracks = candidates
+          .where((t) {
+            if (queueIds.contains(t.spotifyId)) return false;
+            if (t.spotifyId == currentTrack.spotifyId) return false;
+            if (_autoplaySeenTrackIds.contains(t.spotifyId)) return false;
+            return true;
+          })
+          .map((t) => t.copyWith(queueOrigin: QueueItemOrigin.autoplay))
+          .toList();
+
+      if (newTracks.isNotEmpty) {
+        _autoplaySeenTrackIds.addAll(newTracks.map((t) => t.spotifyId));
+        var newQueue = state.playbackQueue;
+        for (final t in newTracks) {
+          newQueue = newQueue.add(t);
+        }
+        state = state.copyWith(playbackQueue: newQueue);
+        _scheduleSaveState();
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch autoplay tracks: $e');
+    } finally {
+      _isFetchingAutoplay = false;
+    }
+  }
+
+  Future<void> _continueWithRelated(Track current) async {
+    if (!ref.read(ultratubeAutoplayProvider)) return;
+    final id = current.youtubeVideoId;
+    if (id == null) return;
+    try {
+      final watched = {
+        for (final t in state.playbackQueue.tracks) t.youtubeVideoId,
+        ..._autoplaySeenTrackIds.map((s) => s.split(':').last),
+      };
+      final related = await const UltratubeCatalog().related(id);
+      final next = related.where((t) => !watched.contains(t.youtubeVideoId)).toList();
+      if (next.isEmpty || state.currentTrack?.youtubeVideoId != id) return;
+      final queue = [
+        ...state.playbackQueue.tracks,
+        ...next.take(10).map((t) => t.copyWith(queueOrigin: QueueItemOrigin.autoplay)),
+      ];
+      _autoplaySeenTrackIds.addAll(next.take(10).map((t) => t.spotifyId));
+      await playTrack(
+        queue[state.playbackQueue.tracks.length],
+        queue: queue,
+        queueIndex: state.playbackQueue.tracks.length,
+      );
+    } catch (e) {
+      debugPrint('Ultratube: autoplay falhou: $e');
+    }
+  }
+
+  Future<void> _evaluateYoutubeAutoplay() async {
+    if (!ref.read(ultratubeAutoplayProvider)) return;
+    if (state.repeatMode != RepeatMode.none || _isFetchingAutoplay) return;
+    final queue = state.playbackQueue;
+    final current = queue.currentTrack;
+    final videoId = current?.youtubeVideoId;
+    if (current == null || videoId == null) return;
+    if (queue.tracks.length - queue.currentIndex - 1 > 2) return;
+    _isFetchingAutoplay = true;
+    try {
+      final related = await const UltratubeCatalog().related(videoId);
+      final queueIds = state.playbackQueue.tracks
+          .map((t) => t.spotifyId)
+          .toSet();
+      final fresh = related
+          .where(
+            (t) =>
+                !queueIds.contains(t.spotifyId) &&
+                !_autoplaySeenTrackIds.contains(t.spotifyId),
+          )
+          .take(10)
+          .map((t) => t.copyWith(queueOrigin: QueueItemOrigin.autoplay))
+          .toList();
+      if (fresh.isEmpty) return;
+      _autoplaySeenTrackIds.addAll(fresh.map((t) => t.spotifyId));
+      var newQueue = state.playbackQueue;
+      for (final t in fresh) {
+        newQueue = newQueue.add(t);
+      }
+      state = state.copyWith(playbackQueue: newQueue);
+      _scheduleSaveState();
+    } catch (e) {
+      debugPrint('Ultratube: falha ao buscar próximos vídeos: $e');
+    } finally {
+      _isFetchingAutoplay = false;
+    }
+  }
+
+  void _handleNetworkStreamFailure(
+    Duration lastPosition, {
+    String? statusError,
+  }) async {
+    if (_isRecovering) return;
+    _isRecovering = true;
+
+    final track = state.currentTrack;
+    if (track == null) {
+      _isRecovering = false;
+      return;
+    }
+
+    _consecutiveTrackFailures++;
+    if (_consecutiveTrackFailures >= 3) {
+      debugPrint(
+        'PlayerNotifier: Max network stream recovery attempts reached.',
+      );
+      state = state.copyWith(
+        loadError:
+            statusError ?? 'Stream failed to connect after multiple attempts',
+        isLoadingVideo: false,
+      );
+      _isRecovering = false;
+      return;
+    }
+
+    _playbackGeneration++;
+    final myGen = _playbackGeneration;
+
+    try {
+      var resolvedTrack = track;
+      Map<String, String>? resolvedHeaders;
+      if (track.networkStreamUrl != null) {
+        final extracted = await ref
+            .read(networkStreamServiceProvider)
+            .extractDirectStreamUrl(track.networkStreamUrl!);
+        if (extracted != null) {
+          resolvedTrack = track.copyWith(networkStreamUrl: extracted.url);
+          resolvedHeaders = extracted.httpHeaders;
+        }
+      }
+
+      if (_disposed || myGen != _playbackGeneration) {
+        return; // aborted by new track or another action
+      }
+
+      final actualStartAt = _pendingSeek?.position ?? lastPosition;
+      if (_pendingSeek != null) {
+        debugPrint(
+          'PlayerNotifier: Applying pending seek during recovery: ${_pendingSeek!.position}',
+        );
+      }
+
+      await _controller.stop();
+      if (_disposed || myGen != _playbackGeneration) return;
+
+      state = state.copyWith(isLoadingVideo: true);
+
+      // Restore position but do not auto-resume unless user intended play
+      await _controller.play(
+        resolvedTrack.toPlaybackTrack(httpHeaders: resolvedHeaders),
+        startAt: actualStartAt,
+        play: _userIntentPlay,
+      );
+
+      if (_disposed || myGen != _playbackGeneration) return;
+      _isRecovering = false;
+    } catch (e) {
+      debugPrint('PlayerNotifier: Network stream recovery failed: $e');
+      if (_disposed || myGen != _playbackGeneration) return;
+
+      state = state.copyWith(
+        loadError: 'Network stream error: $e',
+        isLoadingVideo: false,
+      );
+      _isRecovering = false;
+    }
+  }
+}
+
+final playerProvider = NotifierProvider<PlayerNotifier, PlayerState>(
+  PlayerNotifier.new,
+);

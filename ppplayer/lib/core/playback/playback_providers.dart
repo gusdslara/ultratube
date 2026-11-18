@@ -1,0 +1,261 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pp_playback_engine/pp_playback_engine.dart';
+import 'package:flutter_chromium_webview/chromium_youtube_player.dart';
+import 'package:flutter_chromium_webview/flutter_chromium_webview.dart';
+import 'package:path_provider/path_provider.dart';
+
+import 'chromium_playback_engine.dart';
+import 'playback_selection.dart';
+import '../models/track.dart';
+import 'ultratube_playback_controller.dart';
+import '../api/ultratube_catalog.dart';
+import '../api/sponsorblock.dart';
+import '../ultratube/ultratube_store.dart';
+import '../services/settings_provider.dart';
+import '../local_library/local_library_service.dart';
+import 'local_file_playback_controller.dart';
+import '../network_outputs/network_output_providers.dart';
+import '../db/app_database.dart' show appDatabaseProvider;
+import '../ultratube/ultratube_platform.dart';
+
+export 'playback_service.dart' show playbackServiceProvider, PlaybackService;
+
+export 'package:pp_playback_engine/pp_playback_engine.dart';
+
+// Extension to convert App Track to PlaybackTrack
+extension TrackToPlayback on Track {
+  PlaybackTrack toPlaybackTrack({Map<String, String>? httpHeaders}) {
+    if (sourceType == TrackSourceType.online) {
+      if (youtubeVideoId == null) {
+        throw StateError(
+          'Cannot create PlaybackTrack: youtubeVideoId is null for online track',
+        );
+      }
+      final id = youtubeVideoId!;
+      final playlist = RegExp(r'^(PL|RD|LL)[a-zA-Z0-9_-]+$').hasMatch(id);
+      if (!playlist && !RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(id)) {
+        throw StateError('Invalid YouTube source ID "$id"');
+      }
+      if (youtubeVideoId!.contains('http')) {
+        throw StateError(
+          'Cannot create PlaybackTrack: Invalid online source ID "$youtubeVideoId"',
+        );
+      }
+    }
+
+    PlaybackLiveStatus mapLiveStatus(StreamLiveStatus status) {
+      switch (status) {
+        case StreamLiveStatus.live:
+          return PlaybackLiveStatus.live;
+        case StreamLiveStatus.onDemand:
+          return PlaybackLiveStatus.onDemand;
+        case StreamLiveStatus.unknown:
+          return PlaybackLiveStatus.unknown;
+      }
+    }
+
+    PlaybackSourceType playbackSource;
+    String finalId = spotifyId;
+    YoutubeSourceType? youtubeSourceType;
+
+    switch (sourceType) {
+      case TrackSourceType.local:
+        playbackSource = PlaybackSourceType.local;
+        break;
+      case TrackSourceType.networkStream:
+        playbackSource = PlaybackSourceType.networkStream;
+        if (networkStreamUrl != null) {
+          for (var exp in [
+            RegExp(
+              r"^https:\/\/(?:www\.|m\.)?youtube\.com\/watch\?(?:.*&)?v=([_\-a-zA-Z0-9]{10,11})(?:&.*)?$",
+            ),
+            RegExp(
+              r"^https:\/\/(?:music\.)?youtube\.com\/watch\?(?:.*&)?v=([_\-a-zA-Z0-9]{10,11})(?:&.*)?$",
+            ),
+            RegExp(
+              r"^https:\/\/(?:www\.|m\.)?youtube\.com\/shorts\/([_\-a-zA-Z0-9]{10,11})(?:\?.*)?$",
+            ),
+            RegExp(
+              r"^https:\/\/(?:www\.|m\.)?youtube(?:-nocookie)?\.com\/embed\/([_\-a-zA-Z0-9]{10,11})(?:\?.*)?$",
+            ),
+            RegExp(r"^https:\/\/youtu\.be\/([_\-a-zA-Z0-9]{10,11})(?:\?.*)?$"),
+            RegExp(
+              r"^https:\/\/(?:www\.|m\.)?youtube\.com\/playlist\?(?:.*&)?list=([_\-a-zA-Z0-9]+)(?:&.*)?$",
+            ),
+          ]) {
+            final match = exp.firstMatch(networkStreamUrl!.trim());
+            if (match != null && match.groupCount >= 1) {
+              playbackSource = PlaybackSourceType.online;
+              finalId = match.group(1)!;
+              if (exp.pattern.contains('playlist')) {
+                youtubeSourceType = YoutubeSourceType.playlist;
+              } else {
+                youtubeSourceType = YoutubeSourceType.video;
+              }
+              break;
+            }
+          }
+        }
+        break;
+      case TrackSourceType.online:
+        playbackSource = PlaybackSourceType.online;
+        finalId = youtubeVideoId!;
+        if (finalId.length > 11 &&
+            (finalId.startsWith('PL') ||
+                finalId.startsWith('RD') ||
+                finalId.startsWith('LL'))) {
+          youtubeSourceType = YoutubeSourceType.playlist;
+        } else {
+          youtubeSourceType = YoutubeSourceType.video;
+        }
+        break;
+    }
+
+    return PlaybackTrack(
+      id: finalId,
+      title: name,
+      artist: artistName,
+      album: albumName,
+      artworkUrl: albumImage,
+      duration: durationMs != null ? Duration(milliseconds: durationMs!) : null,
+      sourceType: playbackSource,
+      // Preserve the durable locator. Local/remote acquisition resolves it
+      // immediately before reading, without persisting a temporary resolved path.
+      localMediaUri: localFilePath,
+      networkMediaUri: networkStreamUrl,
+      isVideo: isVideoFile,
+      youtubeSourceType: youtubeSourceType,
+      liveStatus: mapLiveStatus(liveStatus),
+      httpHeaders: httpHeaders,
+    );
+  }
+}
+
+/// The primary local playback engine.
+final localPlaybackControllerProvider = Provider<PlaybackController>((ref) {
+  PlaybackController engine;
+  const chromiumEnabled = bool.fromEnvironment(
+    'PPPLAYER_CHROMIUM',
+    defaultValue: true,
+  );
+  final selection = PlaybackSelection(
+    platform: defaultTargetPlatform,
+    chromiumEnabled: chromiumEnabled && !kIsWeb,
+  );
+  // Phones play YouTube through Ultratube's own resolver + MediaKit (no
+  // iframe, no ads): NewPipe on Android, the Dart catalog on iOS.
+  if (isUltratubePlatform) {
+    final native = UltratubePlaybackController(
+      MediaKitPlaybackEngine(),
+      resolve: (id, {required video}) => const UltratubeCatalog().resolve(
+        id,
+        video: video,
+        maxHeight: ref.read(videoQualityProvider),
+      ),
+      video: () => ref.read(settingsProvider).showVideo,
+      maxHeight: () => ref.read(videoQualityProvider),
+      segments: const SponsorBlock().segments,
+      skipEnabled: () => ref.read(sponsorSkipProvider),
+      onSkip: (segment) =>
+          LocalLibraryService.showNotice('${segment.label} pulado'),
+    );
+    engine = native;
+    void refresh() => native.refreshVideoMode().catchError((Object error) {
+      debugPrint('Ultratube: não foi possível alternar vídeo: $error');
+      LocalLibraryService.showNotice(
+        'Não foi possível alternar a mídia. A reprodução anterior foi mantida.',
+      );
+    });
+    ref.listen(settingsProvider.select((s) => s.showVideo), (previous, next) {
+      if (previous != next) refresh();
+    });
+    ref.listen(videoQualityProvider, (previous, next) {
+      if (previous != next && ref.read(settingsProvider).showVideo) refresh();
+    });
+  } else {
+    final mediaKit = MediaKitPlaybackEngine();
+    final nativePlayback =
+        !kIsWeb &&
+            {
+              TargetPlatform.iOS,
+              TargetPlatform.macOS,
+            }.contains(defaultTargetPlatform)
+        ? LocalFilePlaybackController(
+            mediaKit,
+            acquireFileLease: (track) => acquireAppleOutputFileLease(
+              track,
+              rootLocatorFor: (path) async {
+                // A failed lookup must never block playback: fall back to the
+                // plain path (valid for unsandboxed builds).
+                try {
+                  return await ref
+                      .read(appDatabaseProvider)
+                      .importRootLocatorForPath(path);
+                } catch (_) {
+                  return null;
+                }
+              },
+            ),
+          )
+        : mediaKit;
+    engine = selection.usesWebKit
+        ? IframeYoutubePlaybackEngine(fallback: nativePlayback)
+        : nativePlayback;
+    if (!selection.usesWebKit &&
+        !kIsWeb &&
+        {
+          TargetPlatform.windows,
+          TargetPlatform.linux,
+          TargetPlatform.macOS,
+        }.contains(defaultTargetPlatform)) {
+      engine = ChromiumPlaybackEngine(
+        youtubeEnabled: selection.usesChromium,
+        fallback: engine,
+        startPlaybackService: null,
+        stopPlaybackService: null,
+        initializeCef: () async {
+          final directory = await getApplicationSupportDirectory();
+          if (!await ChromiumWebViewController.initialize(
+            cachePath: directory.path,
+            keychainBehavior: ChromiumKeychainBehavior.mock,
+          )) {
+            throw StateError('CEF initialization failed');
+          }
+        },
+        createPlayer: () => ChromiumYoutubePlayerController(
+          documentUrl: const String.fromEnvironment(
+            'PPPLAYER_CHROMIUM_DOCUMENT_URL',
+            defaultValue: 'https://ppplayer.com/chromium/player.html',
+          ),
+          profileName: 'ppplayer_youtube_session',
+        ),
+      );
+    }
+  }
+
+  ref.onDispose(() {
+    engine.dispose();
+  });
+
+  return engine;
+});
+
+/// The primary playback controller used by the app. This wraps the local engine
+/// with network capabilities.
+final playbackControllerProvider = Provider<PlaybackController>((ref) {
+  return ref.watch(networkOutputControllerProvider);
+});
+
+/// A persistent GlobalKey to keep the Video surface alive across navigation changes.
+/// This prevents the "surface destroyed" error on Android when switching tabs.
+final videoSurfaceKeyProvider = Provider<GlobalKey>((ref) {
+  return GlobalKey(debugLabel: 'ppplayer_persistent_video_surface');
+});
+
+/// A stream provider that exposes the current player status.
+final playbackStatusProvider = StreamProvider<PlaybackStatus>((ref) {
+  final controller = ref.watch(playbackControllerProvider);
+  return controller.statusStream;
+});

@@ -1,0 +1,903 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart' hide RepeatMode;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_kit/media_kit.dart' as mk;
+import 'package:media_kit_video/media_kit_video.dart' as video;
+import 'package:ppplayer/l10n/app_localizations.dart';
+import '../../../core/playback/playback_providers.dart';
+import '../../../core/player/player_provider.dart';
+import '../../../core/services/settings_provider.dart';
+import '../../../shared/widgets/tactile_buttons.dart';
+import '../../../shared/widgets/artists_links.dart';
+import '../../../core/db/app_database.dart' as db;
+import '../../../shared/widgets/context_menu/content_context_menu.dart';
+import '../player_providers.dart';
+import 'subtitle_panel.dart';
+import 'player_controls_layout.dart';
+import '../../../core/network_outputs/network_output_providers.dart';
+import '../../network_outputs/output_picker.dart';
+
+class PlayerOverlays extends ConsumerStatefulWidget {
+  final VoidCallback onToggleFullscreen;
+  final bool isFullscreen;
+  final VoidCallback onCollapse;
+  final VoidCallback onToggleQueue;
+  final Widget middleTopBar;
+  final bool alwaysShowControls;
+
+  const PlayerOverlays({
+    super.key,
+    required this.onToggleFullscreen,
+    required this.isFullscreen,
+    required this.onCollapse,
+    required this.onToggleQueue,
+    required this.middleTopBar,
+    this.alwaysShowControls = false,
+  });
+
+  @override
+  ConsumerState<PlayerOverlays> createState() => _PlayerOverlaysState();
+}
+
+class _PlayerOverlaysState extends ConsumerState<PlayerOverlays> {
+  Timer? _hideTimer;
+  bool _isHoveringControls = false;
+  double? _dragValue;
+  final FocusNode _overlayFocusNode = FocusNode();
+
+  mk.Player? get _mkPlayer {
+    final engine = ref.read(playbackControllerProvider);
+    final renderer = engine.renderer;
+    return renderer is video.VideoController ? renderer.player : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _overlayFocusNode.addListener(_onFocusChanged);
+    _startHideTimer();
+  }
+
+  void _onFocusChanged() {
+    if (_overlayFocusNode.hasFocus) {
+      _isHoveringControls = true;
+      _onInteraction();
+    } else {
+      _isHoveringControls = false;
+      if (ref.read(controlsVisibilityProvider)) {
+        _startHideTimer();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _overlayFocusNode.removeListener(_onFocusChanged);
+    _overlayFocusNode.dispose();
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(PlayerOverlays oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.alwaysShowControls && !oldWidget.alwaysShowControls) {
+      if (!ref.read(controlsVisibilityProvider)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted)
+            ref.read(controlsVisibilityProvider.notifier).setVisible(true);
+        });
+      }
+    }
+  }
+
+  void _startHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        final isPlaying = ref.read(playerProvider).isPlaying;
+        if (isPlaying &&
+            !_isHoveringControls &&
+            _dragValue == null &&
+            !widget.alwaysShowControls) {
+          ref.read(controlsVisibilityProvider.notifier).setVisible(false);
+        }
+      }
+    });
+  }
+
+  void _onInteraction() {
+    if (!ref.read(controlsVisibilityProvider)) {
+      ref.read(controlsVisibilityProvider.notifier).setVisible(true);
+    }
+    _startHideTimer();
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    if (duration.inHours > 0) {
+      return '${duration.inHours}:$minutes:$seconds';
+    }
+    return '$minutes:$seconds';
+  }
+
+  Future<void> _showTrackSelectionDialog<T>(
+    String title,
+    List<T> tracks,
+    T currentTrack,
+    ValueChanged<T> onSelect, {
+    VoidCallback? onExternalLoad,
+  }) async {
+    _isHoveringControls = true; // Block timer while dialog is open
+    final selected = await showDialog<T>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...tracks.map((track) {
+                  final isSelected = track == currentTrack;
+                  final dynamic t = track;
+                  String? displayStr;
+                  if (t.id == 'no' || t.id == 'none') {
+                    displayStr = AppLocalizations.of(context)!.off;
+                  } else if (t.title != null &&
+                      t.title.toString().trim().isNotEmpty) {
+                    displayStr = t.title;
+                  } else if (t.language != null &&
+                      t.language.toString().trim().isNotEmpty) {
+                    displayStr = t.language;
+                  } else {
+                    displayStr = t.id;
+                  }
+                  final String displayTitle = displayStr ?? 'Unknown';
+                  return ListTile(
+                    title: Text(displayTitle),
+                    trailing: isSelected ? const Icon(Icons.check) : null,
+                    onTap: () => Navigator.of(context).pop(track),
+                  );
+                }),
+                if (onExternalLoad != null) ...[
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.file_upload),
+                    title: Text(AppLocalizations.of(context)!.loadSubtitleFile),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      onExternalLoad();
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    _isHoveringControls = false;
+    _onInteraction();
+
+    if (selected != null) {
+      onSelect(selected);
+    }
+  }
+
+  void _showSpeedMenu(
+    BuildContext context,
+    PlayerNotifier playerNotifier,
+    double currentSpeed,
+  ) {
+    _isHoveringControls = true; // Block timer while menu is open
+    final RenderBox button = context.findRenderObject() as RenderBox;
+    final RenderBox overlay =
+        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    final RelativeRect position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        button.localToGlobal(Offset.zero, ancestor: overlay),
+        button.localToGlobal(
+          button.size.bottomRight(Offset.zero),
+          ancestor: overlay,
+        ),
+      ),
+      Offset.zero & overlay.size,
+    );
+
+    final speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    showMenu<double>(
+      context: context,
+      position: position,
+      items: speeds.map((speed) {
+        return PopupMenuItem<double>(
+          value: speed,
+          child: Row(
+            children: [
+              Text('${speed}x'),
+              if (currentSpeed == speed) ...[
+                const Spacer(),
+                const Icon(Icons.check, size: 16),
+              ],
+            ],
+          ),
+        );
+      }).toList(),
+    ).then((selected) {
+      _isHoveringControls = false;
+      _onInteraction();
+      if (selected != null) {
+        playerNotifier.setSpeed(selected);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final playerState = ref.watch(playerProvider);
+    final playerNotifier = ref.read(playerProvider.notifier);
+    final settings = ref.watch(settingsProvider);
+    final isPlaying = playerState.isPlaying;
+    final colorScheme = Theme.of(context).colorScheme;
+    final track = playerState.currentTrack;
+    final viewport = MediaQuery.sizeOf(context);
+    final compactLandscape =
+        viewport.width > viewport.height && viewport.height < 500;
+    final desktopWindow = viewport.width >= 1000 && !widget.isFullscreen;
+    final playbackStatus = ref.watch(playbackStatusProvider).value;
+    final hasVideo = playbackStatus?.hasVideo ?? false;
+    // Capability is derived from live status fields so it updates mid-session
+    // (e.g. switching from a local video to YouTube or audio-only).
+    // isIFrameMode covers YouTube iframe; !hasVideo covers audio-only tracks.
+    final supportsVideoFitMode =
+        hasVideo && !(playbackStatus?.isIFrameMode ?? false);
+
+    final controlsVisible = ref.watch(controlsVisibilityProvider);
+    final showControls = widget.alwaysShowControls || controlsVisible;
+
+    // When paused, controls must always be visible — the timer guard in
+    // _startHideTimer only hides when isPlaying, but if controls were hidden
+    // before the pause (e.g. quick play-then-pause) we must restore them.
+    if (!isPlaying && !showControls && !widget.alwaysShowControls) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !widget.alwaysShowControls) {
+          ref.read(controlsVisibilityProvider.notifier).setVisible(true);
+          // Don't start hide timer — leave controls up while paused.
+        }
+      });
+    }
+
+    final trackOptionsButton = Builder(
+      builder: (btnContext) => TactileIconButton(
+        icon: Icons.more_vert,
+        color: Colors.white.withValues(alpha: 0.8),
+        hoverColor: colorScheme.primary,
+        tooltip: AppLocalizations.of(context)!.moreOptions,
+        onTap: () {
+          _onInteraction();
+          _isHoveringControls = true;
+          final renderBox = btnContext.findRenderObject() as RenderBox?;
+          final offset = renderBox?.localToGlobal(Offset.zero);
+          if (track != null) {
+            showContentContextMenu(
+              context,
+              ref,
+              position: offset != null
+                  ? offset + Offset(0, renderBox!.size.height)
+                  : Offset.zero,
+              target: TrackContextTarget(track),
+            );
+          }
+        },
+      ),
+    );
+
+    return Listener(
+      onPointerHover: (_) => _onInteraction(),
+      onPointerDown: (_) => _onInteraction(),
+      onPointerMove: (_) => _onInteraction(),
+      behavior: HitTestBehavior.translucent,
+      child: Focus(
+        focusNode: _overlayFocusNode,
+        canRequestFocus: false,
+        child: Stack(
+          children: [
+            // ── Tap/Hover-to-restore layer ──────────────────────────────────
+            // Active ONLY when controls are hidden. Uses opaque hit testing to
+            // reliably intercept the first tap or mouse movement, restoring controls
+            // without passing the tap to the underlying native WebView (which would
+            // cause an unintended play/pause or link click). Removed when controls
+            // are visible so native interactions work normally.
+            if (!showControls)
+              Positioned.fill(
+                child: MouseRegion(
+                  onHover: (_) => _onInteraction(),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _onInteraction,
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+              ),
+
+            // ── Auto-hiding controls ─────────────────────────────────────────
+            AnimatedOpacity(
+              opacity: showControls ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 300),
+              child: ExcludeFocus(
+                key: const ValueKey('overlays_exclude_focus'),
+                excluding: !showControls,
+                child: IgnorePointer(
+                  ignoring: !showControls,
+                  child: Stack(
+                    children: [
+                      // TOP OVERLAY
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: MouseRegion(
+                          onEnter: (_) => _isHoveringControls = true,
+                          onExit: (_) => _isHoveringControls = false,
+                          child: Container(
+                            padding: EdgeInsets.only(
+                              top: compactLandscape || desktopWindow ? 8 : 16,
+                              bottom: compactLandscape || desktopWindow
+                                  ? 12
+                                  : 24,
+                            ),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.8),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                            child: SafeArea(
+                              bottom: false,
+                              child: Padding(
+                                // Left padding reserves space for the permanent back button
+                                // (44px icon + 12px inset) so the middle bar stays centred.
+                                padding: const EdgeInsets.only(
+                                  left: 56,
+                                  right: 16,
+                                ),
+                                child: Wrap(
+                                  alignment: WrapAlignment.end,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 4,
+                                  children: [
+                                    ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxWidth: viewport.width > 72
+                                            ? viewport.width - 72
+                                            : 0,
+                                      ),
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: widget.middleTopBar,
+                                      ),
+                                    ),
+                                    // Output / Cast button
+                                    Builder(
+                                      builder: (btnContext) {
+                                        final outputState = ref.watch(
+                                          networkOutputSnapshotProvider,
+                                        );
+                                        final isRemote = outputState.connected;
+                                        return TactileIconButton(
+                                          icon: isRemote
+                                              ? Icons.cast_connected
+                                              : Icons.cast,
+                                          color: isRemote
+                                              ? colorScheme.primary
+                                              : Colors.white.withValues(
+                                                  alpha: 0.8,
+                                                ),
+                                          hoverColor: colorScheme.primary,
+                                          tooltip: isRemote
+                                              ? AppLocalizations.of(
+                                                  context,
+                                                )!.playingOn(
+                                                  outputState
+                                                      .selectedOutput
+                                                      .name,
+                                                )
+                                              : AppLocalizations.of(
+                                                  context,
+                                                )!.playOn,
+                                          onTap: () {
+                                            _onInteraction();
+                                            showOutputPicker(btnContext, ref);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                    if (playerState.supportsSpeed) ...[
+                                      Builder(
+                                        builder: (btnContext) =>
+                                            TactileIconButton(
+                                              icon: Icons.speed,
+                                              color: Colors.white.withValues(
+                                                alpha: 0.8,
+                                              ),
+                                              hoverColor: colorScheme.primary,
+                                              tooltip: AppLocalizations.of(
+                                                context,
+                                              )!.playbackSpeed,
+                                              onTap: () {
+                                                _onInteraction();
+                                                _showSpeedMenu(
+                                                  btnContext,
+                                                  playerNotifier,
+                                                  playerState.speed,
+                                                );
+                                              },
+                                            ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
+                                    if (compactLandscape) trackOptionsButton,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // BOTTOM OVERLAY
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: MouseRegion(
+                          onEnter: (_) => _isHoveringControls = true,
+                          onExit: (_) => _isHoveringControls = false,
+                          child: Container(
+                            padding: EdgeInsets.only(
+                              top: compactLandscape || desktopWindow ? 24 : 48,
+                              bottom: compactLandscape || desktopWindow
+                                  ? 8
+                                  : 16,
+                              left: 16,
+                              right: 16,
+                            ),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.85),
+                                  Colors.black.withValues(alpha: 0.4),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                            child: SafeArea(
+                              top: false,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Metadata Row
+                                  if (track != null && !compactLandscape)
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                track.name,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              ArtistsLinks(
+                                                track: track,
+                                                style: TextStyle(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.7),
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        StreamBuilder<bool>(
+                                          stream: ref
+                                              .watch(db.appDatabaseProvider)
+                                              .watchTrackFavorite(
+                                                track.spotifyId,
+                                              ),
+                                          initialData: track.isFavorite,
+                                          builder: (context, snapshot) {
+                                            final isFav =
+                                                snapshot.data ??
+                                                track.isFavorite;
+                                            return TactileIconButton(
+                                              icon: isFav
+                                                  ? Icons.favorite
+                                                  : Icons.favorite_border,
+                                              color: isFav
+                                                  ? colorScheme.primary
+                                                  : Colors.white,
+                                              onTap: () {
+                                                _onInteraction();
+                                                playerNotifier.toggleFavorite(
+                                                  track.copyWith(
+                                                    isFavorite: isFav,
+                                                  ),
+                                                );
+                                              },
+                                            );
+                                          },
+                                        ),
+                                        trackOptionsButton,
+                                      ],
+                                    ),
+                                  if (!compactLandscape)
+                                    const SizedBox(height: 12),
+                                  // Progress Bar
+                                  SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      trackHeight: 4,
+                                      thumbShape: const RoundSliderThumbShape(
+                                        enabledThumbRadius: 6,
+                                      ),
+                                      overlayShape:
+                                          const RoundSliderOverlayShape(
+                                            overlayRadius: 14,
+                                          ),
+                                      activeTrackColor: colorScheme.primary,
+                                      inactiveTrackColor: Colors.white
+                                          .withValues(alpha: 0.15),
+                                      secondaryActiveTrackColor: Colors.white
+                                          .withValues(alpha: 0.5),
+                                      thumbColor: Colors.white,
+                                    ),
+                                    child: Builder(
+                                      builder: (context) {
+                                        final maxDuration =
+                                            playerState.duration.inSeconds > 0
+                                            ? playerState.duration.inSeconds
+                                                  .toDouble()
+                                            : 1.0;
+                                        final buffered = playerState
+                                            .buffered
+                                            .inSeconds
+                                            .toDouble()
+                                            .clamp(0.0, maxDuration);
+                                        final isDailymotion =
+                                            playerNotifier
+                                                    .currentPlaybackTrack
+                                                    ?.networkMediaUri
+                                                    ?.contains(
+                                                      'dailymotion.com',
+                                                    ) ==
+                                                true ||
+                                            playerNotifier
+                                                    .currentPlaybackTrack
+                                                    ?.networkMediaUri
+                                                    ?.contains('dmcdn.net') ==
+                                                true;
+                                        return Slider(
+                                          value:
+                                              (_dragValue ??
+                                                      playerState
+                                                          .position
+                                                          .inSeconds
+                                                          .toDouble())
+                                                  .clamp(0.0, maxDuration),
+                                          secondaryTrackValue: buffered,
+                                          max: maxDuration,
+                                          onChangeStart: (v) {
+                                            _onInteraction();
+                                            if (isDailymotion) {
+                                              final maxV = (buffered - 3.0)
+                                                  .clamp(0.0, maxDuration);
+                                              if (v > maxV) v = maxV;
+                                            }
+                                            setState(() => _dragValue = v);
+                                          },
+                                          onChanged: (v) {
+                                            _onInteraction();
+                                            if (isDailymotion) {
+                                              final maxV = (buffered - 3.0)
+                                                  .clamp(0.0, maxDuration);
+                                              if (v > maxV) v = maxV;
+                                            }
+                                            setState(() => _dragValue = v);
+                                          },
+                                          onChangeEnd: (v) {
+                                            _onInteraction();
+                                            if (isDailymotion) {
+                                              final maxV = (buffered - 3.0)
+                                                  .clamp(0.0, maxDuration);
+                                              if (v > maxV) v = maxV;
+                                            }
+                                            playerNotifier.seekTo(
+                                              Duration(seconds: v.toInt()),
+                                            );
+                                            setState(() => _dragValue = null);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8.0,
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          _formatDuration(
+                                            _dragValue != null
+                                                ? Duration(
+                                                    seconds: _dragValue!
+                                                        .toInt(),
+                                                  )
+                                                : playerState.position,
+                                          ),
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.7,
+                                            ),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        Text(
+                                          _formatDuration(playerState.duration),
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.7,
+                                            ),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  PlayerControlsLayout(
+                                    queueLabel: AppLocalizations.of(
+                                      context,
+                                    )!.queue,
+                                    optionsLabel: AppLocalizations.of(
+                                      context,
+                                    )!.morePlaybackControls,
+                                    queueSelected:
+                                        settings.playerView == PlayerView.queue,
+                                    onInteraction: _onInteraction,
+                                    onToggleQueue: () {
+                                      _onInteraction();
+                                      widget.onToggleQueue();
+                                    },
+                                    transport: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        TactileIconButton(
+                                          icon: Icons.skip_previous,
+                                          tooltip: AppLocalizations.of(
+                                            context,
+                                          )!.previous,
+                                          size: 32,
+                                          color: Colors.white,
+                                          onTap: () {
+                                            _onInteraction();
+                                            playerNotifier.skipPrevious();
+                                          },
+                                        ),
+                                        TactilePlayerPlayPauseButton(
+                                          isPlaying: playerState.isPlaying,
+                                          isLoading: playerState.isLoadingVideo,
+                                          size: 64,
+                                          onTap: () {
+                                            _onInteraction();
+                                            playerNotifier.togglePlay();
+                                          },
+                                        ),
+                                        TactileIconButton(
+                                          icon: Icons.skip_next,
+                                          tooltip: AppLocalizations.of(
+                                            context,
+                                          )!.next,
+                                          size: 32,
+                                          color: Colors.white,
+                                          onTap: () {
+                                            _onInteraction();
+                                            playerNotifier.skipNext();
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    fullscreenButton: IconButton(
+                                      icon: Icon(
+                                        widget.isFullscreen
+                                            ? Icons.fullscreen_exit
+                                            : Icons.fullscreen,
+                                        color: Colors.white,
+                                      ),
+                                      tooltip: widget.isFullscreen
+                                          ? AppLocalizations.of(
+                                              context,
+                                            )!.exitFullscreen
+                                          : AppLocalizations.of(
+                                              context,
+                                            )!.fullscreen,
+                                      onPressed: () {
+                                        _onInteraction();
+                                        widget.onToggleFullscreen();
+                                      },
+                                    ),
+                                    actions: [
+                                      PlayerControlAction(
+                                        label: AppLocalizations.of(
+                                          context,
+                                        )!.shuffle,
+                                        icon: Icons.shuffle,
+                                        selected: playerState.isShuffled,
+                                        onSelected:
+                                            playerNotifier.toggleShuffle,
+                                      ),
+                                      PlayerControlAction(
+                                        label: AppLocalizations.of(
+                                          context,
+                                        )!.repeat,
+                                        icon:
+                                            playerState.repeatMode ==
+                                                RepeatMode.one
+                                            ? Icons.repeat_one
+                                            : Icons.repeat,
+                                        selected:
+                                            playerState.repeatMode !=
+                                            RepeatMode.none,
+                                        onSelected: playerNotifier.cycleRepeat,
+                                      ),
+                                      PlayerControlAction(
+                                        label: AppLocalizations.of(
+                                          context,
+                                        )!.autoplay,
+                                        icon: Icons.all_inclusive,
+                                        selected: settings.autoplayEnabled,
+                                        onSelected: () => ref
+                                            .read(settingsProvider.notifier)
+                                            .toggleAutoplay(
+                                              !settings.autoplayEnabled,
+                                            ),
+                                      ),
+                                      if (_mkPlayer != null) ...[
+                                        PlayerControlAction(
+                                          label: AppLocalizations.of(
+                                            context,
+                                          )!.subtitles,
+                                          icon: Icons.closed_caption,
+                                          onSelected: () {
+                                            final player = _mkPlayer;
+                                            if (Platform.isAndroid ||
+                                                Platform.isIOS) {
+                                              showModalBottomSheet(
+                                                context: context,
+                                                builder: (_) => SubtitlePanel(
+                                                  player: player,
+                                                ),
+                                              );
+                                            } else {
+                                              showDialog(
+                                                context: context,
+                                                builder: (_) => AlertDialog(
+                                                  contentPadding:
+                                                      EdgeInsets.zero,
+                                                  content: SizedBox(
+                                                    width: 400,
+                                                    child: SubtitlePanel(
+                                                      player: player,
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                          },
+                                        ),
+                                        PlayerControlAction(
+                                          label: AppLocalizations.of(
+                                            context,
+                                          )!.audioTracks,
+                                          icon: Icons.audiotrack,
+                                          onSelected: () {
+                                            final player = _mkPlayer;
+                                            if (player != null) {
+                                              _showTrackSelectionDialog(
+                                                AppLocalizations.of(
+                                                  context,
+                                                )!.audioTracks,
+                                                player.state.tracks.audio,
+                                                player.state.track.audio,
+                                                (t) => player.setAudioTrack(t),
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ],
+                                      if (supportsVideoFitMode)
+                                        PlayerControlAction(
+                                          label:
+                                              settings.videoFitMode ==
+                                                  VideoFitMode.fill
+                                              ? AppLocalizations.of(
+                                                  context,
+                                                )!.fitVideo
+                                              : AppLocalizations.of(
+                                                  context,
+                                                )!.fillVideo,
+                                          icon:
+                                              settings.videoFitMode ==
+                                                  VideoFitMode.fill
+                                              ? Icons.fit_screen
+                                              : Icons.crop_free,
+                                          onSelected: () => ref
+                                              .read(settingsProvider.notifier)
+                                              .setVideoFitMode(
+                                                settings.videoFitMode ==
+                                                        VideoFitMode.fit
+                                                    ? VideoFitMode.fill
+                                                    : VideoFitMode.fit,
+                                              ),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ], // end inner Stack children (auto-hiding controls)
+                  ), // end inner Stack
+                ), // end IgnorePointer
+              ), // end ExcludeFocus
+            ), // end AnimatedOpacity (auto-hiding)
+            // ── Permanent back/collapse button ──────────────────────────────────
+            // MUST be the LAST child of the outer Stack so it is painted on top
+            // and hit-tested first. Stack traverses children in reverse order for
+            // hit-testing, so placing it last guarantees clicks reach it even
+            // when the IgnorePointer overlay sits beneath it in z-order.
+            Positioned(
+              top: 0,
+              left: 0,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 16, left: 12),
+                  child: TactileIconButton(
+                    key: const ValueKey('player_back_button_permanent'),
+                    icon: Icons.keyboard_arrow_down,
+                    size: 32,
+                    color: Colors.white,
+                    padding: EdgeInsets.zero,
+                    onTap: widget.onCollapse,
+                  ),
+                ),
+              ),
+            ),
+          ], // end outer Stack children
+        ), // end outer Stack
+      ), // end Focus
+    ); // end Listener / return
+  }
+}

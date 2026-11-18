@@ -1,0 +1,86 @@
+name: ppplayer
+title: PPPlayer
+base: core24
+version: '4.0.2'
+summary: Discover, stream, and enjoy music and videos in one modern media player.
+description: |
+  PPPlayer is a modern, beautifully designed media player built with Flutter, bringing music, videos, and online streams together in one seamless experience.
+  Whether you're exploring new music, enjoying your personal media collection, or playing content from network sources, PPPlayer makes it simple to access and enjoy your favorite entertainment.
+
+  Features
+
+  Music Discovery
+  Explore music and discover new content through a modern, intuitive interface.
+
+  Video Playback
+  Enjoy your favorite videos with a clean, distraction-free playback experience.
+
+  Local Media Libraries
+  Access and organize your locally stored music and video collections in one convenient place.
+
+  Network Streaming
+  Play supported media streams from network sources without switching between applications.
+
+  Playlist Management
+  Create and manage playlists to keep your favorite media organized and easily accessible.
+
+  Modern Interface
+  Enjoy a polished, responsive interface powered by Flutter, designed for a comfortable desktop experience.
+
+  Why PPPlayer?
+
+  PPPlayer brings together the essential tools for enjoying your digital media in a single application. With its modern design and straightforward navigation, it offers a convenient way to manage and play your content.
+
+  One player. All your media.
+
+license: MIT
+website: https://ppplayer.com
+issues: https://github.com/ppplayer-labs/app/issues
+source-code: https://github.com/ppplayer-labs/app
+contact: https://ppplayer.com/support
+icon: snap/gui/icon.png
+
+grade: stable
+confinement: strict
+
+platforms:
+  amd64:
+
+apps:
+  ppplayer:
+    command: ppplayer
+    extensions: [gnome]
+    plugs:
+      - network
+      - network-bind
+      - audio-playback
+      - home
+      - removable-media
+      - opengl
+      - x11
+      - wayland
+      - browser-support
+    environment:
+      LD_LIBRARY_PATH: "$SNAP/lib:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib/x86_64-linux-gnu/blas:$SNAP/usr/lib/x86_64-linux-gnu/lapack:$LD_LIBRARY_PATH"
+
+parts:
+  bundle:
+    plugin: dump
+    source: build/linux/x64/release/bundle
+    stage-packages:
+      - libmpv2
+      - libsecret-1-0
+      - libvulkan1
+      - libepoxy0
+      - libblas3
+      - liblapack3
+    override-prime: |
+      craftctl default
+      for dir in "$CRAFT_PRIME"/usr/lib/*-linux-gnu; do
+        if [ -d "$dir/blas" ] && [ ! -e "$dir/libblas.so.3" ]; then
+          ln -sf blas/libblas.so.3 "$dir/libblas.so.3"
+        fi
+        if [ -d "$dir/lapack" ] && [ ! -e "$dir/liblapack.so.3" ]; then
+          ln -sf lapack/liblapack.so.3 "$dir/liblapack.so.3"
+        fi
+      done

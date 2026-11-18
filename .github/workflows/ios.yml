@@ -1,0 +1,62 @@
+name: Ultratube iOS (unsigned IPA)
+
+# Gera um .ipa SEM assinatura para sideload (Sideloadly, AltStore, SideStore,
+# TrollStore). A assinatura acontece no momento da instalação, com o Apple ID
+# de quem instala. Disparo manual para não gastar minutos de runner macOS.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ppplayer
+
+jobs:
+  build-ios:
+    name: Build iOS (no codesign)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 'latest-stable'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          mkdir -p build/ios/SourcePackages/
+          flutter pub get
+
+      - name: Build iOS app (release, unsigned)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d ' \r')
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry "Ultratube-${VERSION}-unsigned.ipa" Payload
+          ls -lh Ultratube-*.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ultratube-iOS
+          path: ppplayer/Ultratube-*-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,1165 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Uzbek (`uz`).
+class AppLocalizationsUz extends AppLocalizations {
+  AppLocalizationsUz([String locale = 'uz']) : super(locale);
+
+  @override
+  String get appTitle => 'PPPlayer';
+
+  @override
+  String titleSubtitle(Object title, Object subtitle) {
+    return '$title, $subtitle';
+  }
+
+  @override
+  String get albums => 'ALBOMLAR';
+
+  @override
+  String get api => 'API';
+
+  @override
+  String get artists => 'IJROCHILAR';
+
+  @override
+  String get artwork => 'MUQOVA';
+
+  @override
+  String get appVersion => 'Ilova versiyasi';
+
+  @override
+  String get artist => 'Ijrochi';
+
+  @override
+  String get artistsYouFollow => 'Kuzatayotgan ijrochilaringiz';
+
+  @override
+  String get autoplay => 'Avtomatik ijro';
+
+  @override
+  String get becauseYouListenedTo => 'Chunki siz tingladingiz';
+
+  @override
+  String get browseAll => 'Hammasini ko\'rish';
+
+  @override
+  String get cancel => 'Bekor qilish';
+
+  @override
+  String get clearAppCache => 'Ilova keshini tozalash?';
+
+  @override
+  String get clearCache => 'Keshni tozalash';
+
+  @override
+  String get clearHistory => 'Tarixni tozalash?';
+
+  @override
+  String get clearRecentlyPlayed => 'Yaqinda ijro etilganlarni tozalash';
+
+  @override
+  String get contentMarket => 'Kontent bozori';
+
+  @override
+  String get continueListening => 'Tinglashni davom ettirish';
+
+  @override
+  String get continueVideoPlaybackInASmallWindow =>
+      'Videoni kichik oynada davom ettirish';
+
+  @override
+  String get create => 'Yaratish';
+
+  @override
+  String get createAPlaylistToGetStarted => 'Boshlash uchun pleylist yarating';
+
+  @override
+  String currentSelectedcountry(Object country) {
+    return 'Joriy: $country';
+  }
+
+  @override
+  String get deletePlaylist => 'Pleylistni o\'chirish';
+
+  @override
+  String get editProfile => 'Profilni tahrirlash';
+
+  @override
+  String errorLoadingMarkets(Object err) {
+    return 'Bozorlarni yuklashda xato: $err';
+  }
+
+  @override
+  String error(Object error) {
+    return 'Xato: $error';
+  }
+
+  @override
+  String explore(Object genre) {
+    return '${genre}ni kashf etish';
+  }
+
+  @override
+  String get fansAlsoLike => 'MUXLISLAR HAM YOQTIRADI';
+
+  @override
+  String featuringTouppercase(Object artist) {
+    return 'ISHTIROKIDA $artist';
+  }
+
+  @override
+  String get featuredPlaylists => 'Tanlangan pleylistlar';
+
+  @override
+  String get followArtistsToSeeThemHere =>
+      'Ijrochilarni kuzating, ular bu yerda ko\'rinadi';
+
+  @override
+  String get followStationsToSeeThemHere =>
+      'Stansiyalarni kuzating, ular bu yerda ko\'rinadi';
+
+  @override
+  String get forceAudioonlyStreamsToSaveData =>
+      'Trafik tejash uchun faqat audio oqimlarini majburlash';
+
+  @override
+  String get freesUpSpaceAndForcesFreshDataOnNextLoad =>
+      'Joyni bo\'shatadi va keyingi yuklashda yangi ma\'lumotlarni majburlaydi';
+
+  @override
+  String get fromYourFavorites => 'Sevimlilaringizdan';
+
+  @override
+  String get goBack => 'Orqaga';
+
+  @override
+  String inspiredByName(Object name) {
+    return '$name bilan ilhomlangan';
+  }
+
+  @override
+  String get keepPlayingSimilarTracksWhenQueueEnds =>
+      'Navbat tugaganda o\'xshash qo\'shiqlarni ijro etishni davom ettirish';
+
+  @override
+  String get library => 'Kutubxona';
+
+  @override
+  String get likeAlbumsToSeeThemHere =>
+      'Albomlarni yoqtiring, ular bu yerda ko\'rinadi';
+
+  @override
+  String get likedSongs => 'Yoqtirgan qo\'shiqlar';
+
+  @override
+  String get lowDataMode => 'Kam trafik rejimi';
+
+  @override
+  String get madeForYou => 'Siz uchun tayyorlangan';
+
+  @override
+  String moreLikeName(Object name) {
+    return '$name singari ko\'proq';
+  }
+
+  @override
+  String get moreOptions => 'Ko\'proq imkoniyatlar';
+
+  @override
+  String get nameYourMasterpiece => 'Asaringizga nom bering...';
+
+  @override
+  String get newPlaylist => 'Yangi pleylist';
+
+  @override
+  String get newReleases => 'Yangi chiqarilganlar';
+
+  @override
+  String get next => 'Keyingisi';
+
+  @override
+  String get noAlbumsFound => 'Albomlar topilmadi';
+
+  @override
+  String get noArtistsFollowed => 'Kuzatilayotgan ijrochilar yo\'q';
+
+  @override
+  String get noArtistsFound => 'Ijrochilar topilmadi';
+
+  @override
+  String get noLikedAlbums => 'Yoqtirilgan albomlar yo\'q';
+
+  @override
+  String get noPlaylistsFound => 'Pleylistlar topilmadi';
+
+  @override
+  String get noPlaylistsYet => 'Hali pleylistlar yo\'q';
+
+  @override
+  String get noResultsFound => 'Natijalar topilmadi';
+
+  @override
+  String get noStationsFollowed => 'Kuzatilayotgan stansiyalar yo\'q';
+
+  @override
+  String get noTrackPlaying => 'Hech qanday qo\'shiq ijro etilmayapti';
+
+  @override
+  String get noTracksFound => 'Qo\'shiqlar topilmadi';
+
+  @override
+  String get playlists => 'PLEYLISTLAR';
+
+  @override
+  String get popular => 'MASHHUR';
+
+  @override
+  String get permanentlyRemoveListeningHistory =>
+      'Tinglash tarixini butunlay o\'chirish';
+
+  @override
+  String get pictureinpicturePip => 'Rasm ichida rasm (PiP)';
+
+  @override
+  String get popularAlbums => 'Mashhur albomlar';
+
+  @override
+  String get popularArtists => 'Mashhur ijrochilar';
+
+  @override
+  String get popularGenres => 'Mashhur janrlar';
+
+  @override
+  String get popularSongs => 'Mashhur qo\'shiqlar';
+
+  @override
+  String get popularTracks => 'Mashhur treklarlar';
+
+  @override
+  String get popularHitsRightNow => 'Hozirgi mashhur hitlar';
+
+  @override
+  String get previous => 'Oldingisi';
+
+  @override
+  String get queue => 'NAVBAT';
+
+  @override
+  String get recentSearches => 'So\'nggi qidiruvlar';
+
+  @override
+  String get recommendedForYou => 'Siz uchun tavsiya etilgan';
+
+  @override
+  String get scraping => 'Ma\'lumot olinmoqda';
+
+  @override
+  String get search => 'Qidirish';
+
+  @override
+  String get searchInAlbum => 'Albomda qidirish...';
+
+  @override
+  String get searchInLibrary => 'Kutubxonada qidirish...';
+
+  @override
+  String get searchInPlaylist => 'Pleylistda qidirish';
+
+  @override
+  String get searchLikedSongs => 'Yoqtirgan qo\'shiqlarni qidirish...';
+
+  @override
+  String get searchPopularSongs => 'Mashhur qo\'shiqlarni qidirish...';
+
+  @override
+  String get selectMarket => 'Bozorni tanlash';
+
+  @override
+  String get settings => 'Sozlamalar';
+
+  @override
+  String get showVideoPlayer => 'Video pleyerni ko\'rsatish';
+
+  @override
+  String get shuffle => 'Tasodifiy';
+
+  @override
+  String get spotifyCredentials => 'Spotify hisob ma\'lumotlari';
+
+  @override
+  String get suggestedStations => 'Tavsiya etilgan stansiyalar';
+
+  @override
+  String get tracks => 'TREKLAR';
+
+  @override
+  String get trending => 'Trendda';
+
+  @override
+  String get tryAgain => 'Qayta urinish';
+
+  @override
+  String get tryADifferentSearchTerm =>
+      'Boshqa qidiruv so\'zini sinab ko\'ring';
+
+  @override
+  String get useYoutubePlayerWhenAvailable =>
+      'Mavjud bo\'lsa YouTube pleyerini ishlatish';
+
+  @override
+  String get video => 'VIDEO';
+
+  @override
+  String get whatDoYouWantToListenTo => 'Nima tinglashni xohlaysiz?';
+
+  @override
+  String get youtubeCredentials => 'YouTube hisob ma\'lumotlari';
+
+  @override
+  String get yourLibrary => 'Sizning kutubxonangiz';
+
+  @override
+  String get playerscreenviewswitch => 'pleyer_ekrani_ko_rinish_almashtirish';
+
+  @override
+  String get addToPlaylist => 'Pleylistga qo\'shish';
+
+  @override
+  String get addToQueue => 'Navbatga qo\'shish';
+
+  @override
+  String get copyId => 'ID nusxalash';
+
+  @override
+  String get copyLink => 'Havolani nusxalash';
+
+  @override
+  String get copySpotifyLink => 'Spotify havolasidan nusxa olish';
+
+  @override
+  String get copyYouTubeLink => 'YouTube havolasidan nusxa olish';
+
+  @override
+  String get copySpotifyId => 'Spotify ID\'sidan nusxa olish';
+
+  @override
+  String get copyYouTubeId => 'YouTube ID\'sidan nusxa olish';
+
+  @override
+  String get idCopied => 'ID nusxalandi';
+
+  @override
+  String get discover => 'Kashf etish';
+
+  @override
+  String get enterYourName => 'Ismingizni kiriting';
+
+  @override
+  String get favorites => 'Sevimlilar';
+
+  @override
+  String get goToAlbum => 'Albomga o\'tish';
+
+  @override
+  String get goToArtist => 'Ijrochiga o\'tish';
+
+  @override
+  String get goToArtistRadio => 'Ijrochi radioga o\'tish';
+
+  @override
+  String get goToPlaylist => 'Pleylistga o\'tish';
+
+  @override
+  String get goToSongRadio => 'Qo\'shiq radioga o\'tish';
+
+  @override
+  String get home => 'Asosiy';
+
+  @override
+  String get myAwesomePlaylist => 'Mening ajoyib pleylistim';
+
+  @override
+  String get myPlaylist => 'Mening pleylistim';
+
+  @override
+  String get newPlaylist1 => 'Yangi pleylist';
+
+  @override
+  String get play => 'Ijro etish';
+
+  @override
+  String get playStation => 'Stansiyani ijro etish';
+
+  @override
+  String get playNext => 'Keyingisini ijro etish';
+
+  @override
+  String get playlist => 'Pley-list';
+
+  @override
+  String get playlistName => 'Pleylist nomi';
+
+  @override
+  String get playlists1 => 'Pleylistlar';
+
+  @override
+  String get queue1 => 'Navbat';
+
+  @override
+  String get queueNowPlaying => 'Hozir ijro etilmoqda';
+
+  @override
+  String get queueUpNext => 'Keyingi';
+
+  @override
+  String get recentlyPlayed => 'Yaqinda ijro etilgan';
+
+  @override
+  String get removeFromQueue => 'Navbatdan olib tashlash';
+
+  @override
+  String get retry => 'Qayta urinish';
+
+  @override
+  String get searchMusicArtistsAlbums => 'Musiqa, ijrochilar, albomlar...';
+
+  @override
+  String get share => 'Ulashish';
+
+  @override
+  String featuringArtist(String artistName) {
+    return 'ISHTIROKIDA $artistName';
+  }
+
+  @override
+  String currentCountry(String country) {
+    return 'Joriy: $country';
+  }
+
+  @override
+  String get queueTooltip => 'Navbat';
+
+  @override
+  String get searchHint => 'Musiqa, ijrochilar, albomlar...';
+
+  @override
+  String get language => 'Til';
+
+  @override
+  String get systemDefault => 'Tizim standarti';
+
+  @override
+  String get songsTab => 'Qo\'shiqlar';
+
+  @override
+  String get foldersTab => 'Jildlar';
+
+  @override
+  String get artistsTab => 'Ijrochilar';
+
+  @override
+  String get albumsTab => 'Albomlar';
+
+  @override
+  String get genresTab => 'Janrlar';
+
+  @override
+  String get noLocalGenres => 'No local genres found';
+
+  @override
+  String get playbackSpeed => 'Ijro tezligi';
+
+  @override
+  String get addMusic => 'Musiqa qo\'shish';
+
+  @override
+  String get addFiles => 'Fayllar qo\'shish';
+
+  @override
+  String get addFolder => 'Jild qo\'shish';
+
+  @override
+  String get rescanLibrary => 'Kutubxonani qayta skanerlash';
+
+  @override
+  String get sortTitle => 'Nomi bo\'yicha saralash';
+
+  @override
+  String get sortArtist => 'Ijrochi bo\'yicha saralash';
+
+  @override
+  String get sortAlbum => 'Albom bo\'yicha saralash';
+
+  @override
+  String get sortDuration => 'Davomiyligi bo\'yicha saralash';
+
+  @override
+  String get sortDateAdded => 'Qo\'shilgan sana bo\'yicha saralash';
+
+  @override
+  String get sortBy => 'Saralash';
+
+  @override
+  String get trackInformation => 'Trek haqida ma\'lumot';
+
+  @override
+  String get removeFromLibrary => 'Kutubxonadan olib tashlash';
+
+  @override
+  String get showInFolder => 'Jildda ko\'rsatish';
+
+  @override
+  String get unknownArtist => 'Noma\'lum ijrochi';
+
+  @override
+  String get unknownAlbum => 'Noma\'lum albom';
+
+  @override
+  String get importedFiles => 'Import qilingan fayllar';
+
+  @override
+  String get playFolder => 'Jildni o\'ynatish';
+
+  @override
+  String get shuffleFolder => 'Jildni aralashtirib o\'ynatish';
+
+  @override
+  String get playAll => 'Barchasini o\'ynatish';
+
+  @override
+  String get includeSubfolders => 'Ostki jildlarni qo\'shish';
+
+  @override
+  String trackCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count trek',
+      one: '1 trek',
+      zero: '0 trek',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get noLocalSongs => 'Hech qanday mahalliy qo\'shiq topilmadi';
+
+  @override
+  String get searchLocalMusic => 'Mahalliy musiqani qidirish...';
+
+  @override
+  String get viewAsList => 'Ro\'yxat sifatida ko\'rish';
+
+  @override
+  String get viewAsGrid => 'To\'r sifatida ko\'rish';
+
+  @override
+  String get trackInfoPath => 'Yo\'l';
+
+  @override
+  String get trackInfoFormat => 'Format';
+
+  @override
+  String get trackInfoDuration => 'Davomiyligi';
+
+  @override
+  String get aboutDescription => 'Bepul, ochiq manbali media pleer.';
+
+  @override
+  String get aboutApp => 'PPPlayer haqida';
+
+  @override
+  String get appTagline => 'Sizning musiqangiz. Sizning uslubingiz.';
+
+  @override
+  String get exploreApp => 'PPPlayer bilan tanishish';
+
+  @override
+  String get viewSource => 'Manba kodini ko\'rish';
+
+  @override
+  String get seeWhatsNew => 'Nimalar yangi';
+
+  @override
+  String get getHelp => 'Yordam olish';
+
+  @override
+  String versionInfo(Object version, Object build) {
+    return 'Versiya $version (Qurilma $build)';
+  }
+
+  @override
+  String get createdBy => 'Lucas Coelho tomonidan yaratilgan';
+
+  @override
+  String get website => 'Veb-sayt';
+
+  @override
+  String get github => 'GitHub';
+
+  @override
+  String get releaseNotes => 'Chiqarish qaydlari';
+
+  @override
+  String get support => 'Qo\'llab-quvvatlash';
+
+  @override
+  String get license => 'Litsenziya';
+
+  @override
+  String get acknowledgments => 'Minnatdorchilik';
+
+  @override
+  String get close => 'Yopish';
+
+  @override
+  String copyright(Object year) {
+    return '© $year PPPlayer hissa qo\'shuvchilari';
+  }
+
+  @override
+  String get goodMorning => 'Xayrli tong';
+
+  @override
+  String get goodAfternoon => 'Xayrli kun';
+
+  @override
+  String get goodEvening => 'Xayrli kech';
+
+  @override
+  String greetingWithName(Object greeting, Object name) {
+    return '$greeting, $name';
+  }
+
+  @override
+  String get yourMusicIsWaiting => 'Musiqangiz kutmoqda.';
+
+  @override
+  String dailyMix(Object number) {
+    return 'Kundalik miks $number';
+  }
+
+  @override
+  String get yourFavoritesAndNewDiscoveries => 'Sevimli\nva yangi kashfiyotlar';
+
+  @override
+  String get discoverWeekly => 'Haftalik kashfiyot';
+
+  @override
+  String get releaseRadar => 'Yangi relizlar';
+
+  @override
+  String get newMusicJustForYou => 'Faqat siz uchun\nyangi musiqa';
+
+  @override
+  String get chillMix => 'Sokin miks';
+
+  @override
+  String get relaxAndUnwind => 'Dam oling va rohatlaning';
+
+  @override
+  String get focusMix => 'Fokus miks';
+
+  @override
+  String get deepFocusAndProductivity => 'Chuqur diqqat\nva mahsuldorlik';
+
+  @override
+  String artistRadio(Object artist) {
+    return '$artist Radiosi';
+  }
+
+  @override
+  String genreRadio(Object genre) {
+    return '$genre Radiosi';
+  }
+
+  @override
+  String get filterAll => 'Barchasi';
+
+  @override
+  String get filterPlaylists => 'Pley-listlar';
+
+  @override
+  String get filterArtists => 'Ijrochilar';
+
+  @override
+  String get filterAlbums => 'Albomlar';
+
+  @override
+  String get filterStations => 'Stansiyalar';
+
+  @override
+  String get filterStreams => 'Strimlar';
+
+  @override
+  String get localMusicCard => 'Mahalliy musiqa';
+
+  @override
+  String get createPlaylistButton => 'Pley-list yaratish';
+
+  @override
+  String get radioStations => 'Radio stansiyalar';
+
+  @override
+  String get discoverMusic => 'Musiqa kashf etish';
+
+  @override
+  String get importLocalMusic => 'Mahalliy musiqani import qilish';
+
+  @override
+  String get importAudioFiles => 'Audio fayllarni import qilish';
+
+  @override
+  String get importFolder => 'Jildni import qilish';
+
+  @override
+  String get importFolderSubtitle =>
+      'Audio fayllarni o\'z ichiga olgan jildni tanlang';
+
+  @override
+  String get importPlaylist => 'Pley-listni import qilish';
+
+  @override
+  String get importPlaylistSubtitle => '.m3u yoki .m3u8 faylini import qilish';
+
+  @override
+  String get exportPlaylist => 'Pley-listni eksport qilish';
+
+  @override
+  String get playbackErrorUnsupportedFormat =>
+      'Qo\'llab-quvvatlanmaydigan format yoki fayl buzilgan';
+
+  @override
+  String get playbackErrorFileInaccessible =>
+      'Faylga kirib bo\'lmaydi yoki topilmadi';
+
+  @override
+  String get localVideosCard => 'Mahalliy videolar';
+
+  @override
+  String get noLocalVideos => 'Videolar topilmadi';
+
+  @override
+  String get searchLocalVideos => 'Mahalliy videolarni qidirish';
+
+  @override
+  String get addVideos => 'Videolar qo\'shish';
+
+  @override
+  String get subtitles => 'Subtitrlar';
+
+  @override
+  String get audioTracks => 'Audio treklar';
+
+  @override
+  String get loadSubtitleFile => 'Subtitr faylini yuklash...';
+
+  @override
+  String errorLoadingSubtitle(String error) {
+    return 'Taglavhani yuklashda xatolik yuz berdi: $error';
+  }
+
+  @override
+  String get off => 'O\'chirish';
+
+  @override
+  String get playOn => 'Shu qurilmada ijro etish';
+
+  @override
+  String get thisDevice => 'Bu qurilma';
+
+  @override
+  String get availableDevices => 'Mavjud qurilmalar';
+
+  @override
+  String get searchingDevices => 'Qurilmalar qidirilmoqda…';
+
+  @override
+  String get refresh => 'Yangilash';
+
+  @override
+  String get connecting => 'Ulanmoqda…';
+
+  @override
+  String connectingTo(String name) {
+    return '$name qurilmasiga ulanmoqda…';
+  }
+
+  @override
+  String get connected => 'Ulandi';
+
+  @override
+  String get unsupportedOutput =>
+      'Bu manbani ushbu chiqishda ijro etib bo‘lmaydi.';
+
+  @override
+  String get airPlayAudioOutput => 'AirPlay va audio chiqish';
+
+  @override
+  String get returnForAirPlay =>
+      'AirPlay ishlatish uchun shu qurilmada ijro eting.';
+
+  @override
+  String get openSoundSettings =>
+      'Chiqishni tanlash uchun Ovoz sozlamalarini oching.';
+
+  @override
+  String get soundSettingsError => 'Ovoz sozlamalarini ochib bo‘lmadi.';
+
+  @override
+  String get systemOutput => 'Tizim chiqishi';
+
+  @override
+  String playingOn(String name) {
+    return '$name qurilmasida ijro etilmoqda';
+  }
+
+  @override
+  String get chooseAirPlay =>
+      'Karnay yoki televizorni tanlash uchun AirPlay tugmasini bosing.';
+
+  @override
+  String get airPlayDevice => 'AirPlay qurilmasi';
+
+  @override
+  String get playOnIphone => 'Shu iPhone’da ijro etish';
+
+  @override
+  String get chooseIphone =>
+      'Quyidagi AirPlay tugmasi bilan shu iPhone’ni tanlang.';
+
+  @override
+  String get profile => 'Profil';
+
+  @override
+  String get preferences => 'Afzalliklar';
+
+  @override
+  String get themeColor => 'Mavzu rangi';
+
+  @override
+  String get yourMusic => 'Musiqangiz';
+
+  @override
+  String get apiCredentials => 'API hisob ma’lumotlari';
+
+  @override
+  String get dataStorage => 'Ma’lumotlar va xotira';
+
+  @override
+  String get editProfileHelp => 'Ismingiz va avataringizni sozlang';
+
+  @override
+  String get customProvider => 'Maxsus provayder';
+
+  @override
+  String get defaultProvider => 'PPPlayer standarti';
+
+  @override
+  String get proExperience => 'Pro imkoniyatlari faol';
+
+  @override
+  String get beta => 'Beta';
+
+  @override
+  String get loading => 'Yuklanmoqda…';
+
+  @override
+  String get unknown => 'Noma’lum';
+
+  @override
+  String get pause => 'Pauza';
+
+  @override
+  String get repeat => 'Takrorlash';
+
+  @override
+  String get mute => 'Ovozni o‘chirish';
+
+  @override
+  String get unmute => 'Ovozni yoqish';
+
+  @override
+  String get fitVideo => 'Moslashtirish';
+
+  @override
+  String get fillVideo => 'To‘ldirish';
+
+  @override
+  String get fullscreen => 'To‘liq ekran';
+
+  @override
+  String get exitFullscreen => 'To‘liq ekrandan chiqish';
+
+  @override
+  String get volume => 'Ovoz balandligi';
+
+  @override
+  String get save => 'Saqlash';
+
+  @override
+  String get delete => 'O‘chirish';
+
+  @override
+  String get clear => 'Tozalash';
+
+  @override
+  String get follow => 'Kuzatish';
+
+  @override
+  String get unfollow => 'Kuzatishni to‘xtatish';
+
+  @override
+  String get following => 'Kuzatilmoqda';
+
+  @override
+  String get showAll => 'Barchasini ko‘rsatish';
+
+  @override
+  String get appearance => 'Ko‘rinish';
+
+  @override
+  String get subtitleSize => 'O‘lcham';
+
+  @override
+  String get subtitleBackground => 'Fon';
+
+  @override
+  String get earlier => 'Oldinroq';
+
+  @override
+  String get later => 'Keyinroq';
+
+  @override
+  String get reset => 'Tiklash';
+
+  @override
+  String subtitleDelay(String seconds) {
+    return 'Kechikish: $seconds s';
+  }
+
+  @override
+  String get morePlaybackControls => 'Boshqa ijro boshqaruvlari';
+
+  @override
+  String get hideVideo => 'Videoni yashirish';
+
+  @override
+  String get showVideo => 'Videoni ko‘rsatish';
+
+  @override
+  String get closeQueue => 'Navbatni yopish';
+
+  @override
+  String get enabled => 'Yoqilgan';
+
+  @override
+  String get openFile => 'Faylni ochish…';
+
+  @override
+  String get openFolder => 'Jildni ochish…';
+
+  @override
+  String get openUrl => 'URL ochish…';
+
+  @override
+  String get fileMenu => 'Fayl';
+
+  @override
+  String get viewMenu => 'Ko‘rinish';
+
+  @override
+  String get windowMenu => 'Oyna';
+
+  @override
+  String get saveChanges => 'O‘zgarishlarni saqlash';
+
+  @override
+  String get themeAvatarColor => 'Mavzu va avatar rangi';
+
+  @override
+  String get networkStreams => 'Tarmoq oqimlari';
+
+  @override
+  String get networkStream => 'Tarmoq oqimi';
+
+  @override
+  String get openNetworkStream => 'Tarmoq oqimini ochish';
+
+  @override
+  String get editPlaylist => 'Pleylistni tahrirlash';
+
+  @override
+  String get editStreamItem => 'Oqim elementini tahrirlash';
+
+  @override
+  String get streamUrl => 'Oqim URL manzili';
+
+  @override
+  String get platformType => 'Platforma / tur';
+
+  @override
+  String get optionalTitle => 'Sarlavha (ixtiyoriy)';
+
+  @override
+  String get optionalImageUrl => 'Rasm URL manzili (ixtiyoriy)';
+
+  @override
+  String get myStream => 'Mening oqimim';
+
+  @override
+  String get saveToLibrary => 'Kutubxonaga saqlash';
+
+  @override
+  String get justPlay => 'Faqat ijro etish';
+
+  @override
+  String get autoDetect => 'Avtomatik aniqlash';
+
+  @override
+  String get apiKeyRequired => 'API kaliti kerak';
+
+  @override
+  String get customApiKey => 'O‘z API kalitidan foydalanish';
+
+  @override
+  String get clientId => 'Mijoz ID raqami';
+
+  @override
+  String get clientSecret => 'Mijoz maxfiy kaliti';
+
+  @override
+  String get saveCredentials => 'Hisob ma’lumotlarini saqlash';
+
+  @override
+  String get searchStrategy => 'Qidirish usuli';
+
+  @override
+  String get credentialsLocalOnly =>
+      'Bu qurilmada xavfsiz saqlanadi. PPPlayer’ga hech qachon yuborilmaydi.';
+
+  @override
+  String get scrapingHelp =>
+      'API kaliti yoki kvota kerak emas. Sekinroq yoki kamroq ishonchli bo‘lishi mumkin.';
+
+  @override
+  String get streamHelp => 'HTTP(S) URL yoki M3U pleylist havolasini kiriting.';
+
+  @override
+  String get deletePlaylistConfirm => 'Bu pleylist butunlay o‘chirilsinmi?';
+
+  @override
+  String get clearCacheConfirm =>
+      'Kesh o‘chirilsinmi? Kutubxona va sevimlilar o‘zgarmaydi.';
+
+  @override
+  String get clearHistoryConfirm => 'Tinglash tarixi butunlay o‘chirilsinmi?';
+
+  @override
+  String get addedToQueue => 'Navbatga qo‘shildi';
+
+  @override
+  String get addedVideo => 'Video qo‘shildi';
+
+  @override
+  String addedChannels(String count) {
+    return 'Qo‘shilgan kanallar: $count';
+  }
+
+  @override
+  String get removedFromPlaylist => 'Pleylistdan olib tashlandi';
+
+  @override
+  String get exportCancelled => 'Eksport bekor qilindi';
+
+  @override
+  String exportComplete(String count) {
+    return 'Pleylist eksport qilindi. O‘tkazilgan elementlar: $count';
+  }
+
+  @override
+  String get playlistExported => 'Pleylist eksport qilindi';
+
+  @override
+  String get live => 'Jonli';
+
+  @override
+  String get sponsored => 'Homiylik qilingan';
+
+  @override
+  String get removeFromPlaylist => 'Pleylistdan olib tashlash';
+
+  @override
+  String get likedSongsHelp => 'Qo‘shiqlarni saqlang, ular shu yerda ko‘rinadi';
+
+  @override
+  String get apiSingleVideoHint =>
+      'Pleylistni import qilmasdan bu videoni qo‘shish mumkin.';
+
+  @override
+  String get linkCopied => 'Havola nusxalandi';
+
+  @override
+  String get willPlayNext => 'Keyingi bo‘lib ijro etiladi';
+
+  @override
+  String get checkItOut => 'Ko‘rib chiqish';
+
+  @override
+  String get loadFailed => 'Kontentni yuklab bo‘lmadi. Qayta urinib ko‘ring.';
+
+  @override
+  String get removeFolder => 'Jildni olib tashlash';
+
+  @override
+  String get removeFolderConfirmTitle => 'Jild olib tashlansinmi?';
+
+  @override
+  String removeFolderConfirmMessage(String name) {
+    return '\"$name\" va uning medialari kutubxonangizdan olib tashlansinmi? Diskdagi fayllar o‘chirilmaydi.';
+  }
+
+  @override
+  String fileMissingOnDisk(String name) {
+    return '\"$name\" diskda topilmadi';
+  }
+
+  @override
+  String get folderUnavailable =>
+      'Jild mavjud emas. Drayv ulanganligini tekshiring.';
+
+  @override
+  String fileAlreadyImported(String name) {
+    return '\"$name\" allaqachon kutubxonangizda mavjud';
+  }
+
+  @override
+  String filesAlreadyImported(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ta fayl allaqachon kutubxonangizda bor edi',
+      one: '1 ta fayl allaqachon kutubxonangizda bor edi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get folderAlreadyImported =>
+      'Ushbu jild allaqachon import qilingan — yangi fayllar tekshirilmoqda';
+
+  @override
+  String get rescanCompleted => 'Kutubxonani qayta tekshirish yakunlandi';
+
+  @override
+  String rescanFailed(String error) {
+    return 'Jildni qayta tekshirish amalga oshmadi: $error';
+  }
+
+  @override
+  String get importedFolderFallback => 'Import qilingan jild';
+}
