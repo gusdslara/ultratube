@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fullscreen_window/fullscreen_window.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/ai/video_assistant.dart';
@@ -12,6 +13,7 @@ import '../../core/live/live_chat.dart';
 import '../../core/player/player_provider.dart';
 import '../../core/player/video_layout_provider.dart';
 import '../../core/services/settings_provider.dart';
+import '../../core/ultratube/ultratube_platform.dart';
 import '../../core/ultratube/ultratube_store.dart';
 import '../../core/theme/ultratube_theme.dart';
 import '../downloads/track_actions_button.dart';
@@ -177,6 +179,15 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
   }
 
   Future<void> _toggleFullscreen() async {
+    // Desktop: real window fullscreen, shared with the F shortcut.
+    if (isUltratubeDesktop) {
+      final next = !ref.read(isFullscreenProvider);
+      ref.read(isFullscreenProvider.notifier).setFullscreen(next);
+      await FullScreenWindow.setFullScreen(next);
+      if (mounted) setState(() => _fullscreen = next);
+      _measure();
+      return;
+    }
     // In landscape the exit button returns to portrait.
     // Kept until the page closes (restored in dispose), so the phone doesn't
     // flip straight back while still held sideways.
@@ -199,6 +210,10 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
 
   Future<void> _restoreSystemUi() async {
     ref.read(isFullscreenProvider.notifier).setFullscreen(false);
+    if (isUltratubeDesktop) {
+      await FullScreenWindow.setFullScreen(false);
+      return;
+    }
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   }
@@ -214,10 +229,17 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
     });
     _measure();
     final colors = Theme.of(context).colorScheme;
-    // Rotating to landscape goes full screen, like YouTube: a 16:9 slot plus
-    // details cannot fit, and the seek bar would fall off-screen.
+    // Phones: rotating to landscape goes full screen, like YouTube (a 16:9
+    // slot plus details cannot fit). Desktop windows are landscape by nature:
+    // only the fullscreen button / F key goes immersive there.
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
-    final immersive = _fullscreen || landscape;
+    final immersive = isUltratubeDesktop ? ref.watch(isFullscreenProvider) : (_fullscreen || landscape);
+    final size = MediaQuery.sizeOf(context);
+    // Wide windows: the player is capped so details stay visible, and from
+    // 1280 px "up next" moves to a side column like YouTube on desktop.
+    final wide = size.width >= 900;
+    final split = size.width >= 1280;
+    final maxPlayerWidth = ((size.height - 230) * 16 / 9).clamp(480.0, 1280.0);
     final video = _VideoSlot(
       slotKey: _slot,
       item: _item,
@@ -228,9 +250,9 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
     );
 
     return PopScope(
-      canPop: !_fullscreen,
+      canPop: !(isUltratubeDesktop ? immersive : _fullscreen),
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _fullscreen) _toggleFullscreen();
+        if (!didPop) _toggleFullscreen();
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -238,23 +260,69 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
             ? video
             : SafeArea(
                 bottom: false,
-                child: Column(
-                  children: [
-                    AspectRatio(aspectRatio: 16 / 9, child: video),
-                    Expanded(
-                      child: ColoredBox(
+                child: !wide
+                    ? Column(
+                        children: [
+                          AspectRatio(aspectRatio: 16 / 9, child: video),
+                          Expanded(child: ColoredBox(color: colors.surface, child: _details(context))),
+                        ],
+                      )
+                    : ColoredBox(
                         color: colors.surface,
-                        child: _details(context),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.topCenter,
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(maxWidth: maxPlayerWidth),
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(UT.s4, UT.s4, UT.s4, 0),
+                                    child: Column(
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(UT.rMd),
+                                          child: AspectRatio(aspectRatio: 16 / 9, child: video),
+                                        ),
+                                        Expanded(child: _details(context, related: !split)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (split) SizedBox(width: 400, child: _upNext()),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
               ),
       ),
     );
   }
 
-  Widget _details(BuildContext context) {
+  /// "Up next" column for wide windows.
+  Widget _upNext() {
+    final video = _video;
+    if (video == null) return const SizedBox.shrink();
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(0, UT.s4, UT.s4, 120),
+      itemCount: video.related.length + 1,
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return const Padding(
+            padding: EdgeInsets.fromLTRB(UT.s3, 0, 0, UT.s2),
+            child: Text('A seguir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          );
+        }
+        final r = video.related[i - 1];
+        if (r.kind == YtKind.channel) return ChannelTile(r);
+        return VideoRow(r, onTap: () => _play(r));
+      },
+    );
+  }
+
+  Widget _details(BuildContext context, {bool related = true}) {
     final colors = Theme.of(context).colorScheme;
     final item = _item;
     final video = _video;
@@ -339,7 +407,7 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
             ),
           ),
         ),
-        if (video != null)
+        if (video != null && related)
           SliverList.builder(
             itemCount: video.related.length,
             itemBuilder: (context, i) {
@@ -848,7 +916,10 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
     final position = (_drag ?? state.position.inMilliseconds.toDouble()).clamp(0.0, duration <= 0 ? 1.0 : duration);
     String t(Duration d) => durationLabel(d.inSeconds).isEmpty ? '0:00' : durationLabel(d.inSeconds);
 
-    return Container(
+    return MouseRegion(
+      // Desktop: moving the mouse over the video brings the controls back.
+      onHover: (_) => _controls ? _armHide() : _show(),
+      child: Container(
       key: widget.slotKey,
       // Transparent: the shared video surface renders underneath.
       color: started ? Colors.transparent : Colors.black,
@@ -1099,6 +1170,7 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
           ),
         ],
       ),
+    ),
     );
   }
 }

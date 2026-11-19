@@ -34,6 +34,12 @@ class YoutubeAccountApi {
   static bool get _native =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
+  /// The Google sign-in page needs the native WebView hosts (Android/iOS).
+  static bool get signInSupported =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
   Future<dynamic> _call(String method, [Map<String, Object?>? args]) async {
     if (!_native) {
       final account = DartYoutubeAccount.instance;

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fullscreen_window/fullscreen_window.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/live/live_chat.dart';
@@ -15,6 +16,7 @@ import '../../core/twitch/twitch_chat.dart';
 import '../../core/twitch/twitch_providers.dart';
 import '../../core/twitch/twitch_proxy.dart';
 import '../../core/twitch/twitch_store.dart';
+import '../../core/ultratube/ultratube_platform.dart';
 import '../live/live_chat_view.dart';
 import '../player/player_providers.dart';
 import '../ultratube/yt_widgets.dart' show Avatar, NetImage, durationLabel;
@@ -167,6 +169,14 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
   }
 
   Future<void> _toggleFullscreen() async {
+    if (isUltratubeDesktop) {
+      final next = !ref.read(isFullscreenProvider);
+      ref.read(isFullscreenProvider.notifier).setFullscreen(next);
+      await FullScreenWindow.setFullScreen(next);
+      if (mounted) setState(() => _fullscreen = next);
+      _measure();
+      return;
+    }
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     if (!_fullscreen && landscape) {
       await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -187,6 +197,10 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
 
   Future<void> _restoreSystemUi() async {
     ref.read(isFullscreenProvider.notifier).setFullscreen(false);
+    if (isUltratubeDesktop) {
+      await FullScreenWindow.setFullScreen(false);
+      return;
+    }
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   }
@@ -195,7 +209,10 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
   Widget build(BuildContext context) {
     _measure();
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
-    final immersive = _fullscreen || landscape;
+    // Landscape = fullscreen only on phones; desktop uses the button / F key.
+    final immersive = isUltratubeDesktop ? ref.watch(isFullscreenProvider) : (_fullscreen || landscape);
+    final size = MediaQuery.sizeOf(context);
+    final wide = size.width >= 900;
     final slot = _TwitchVideoSlot(
       slotKey: _slot,
       trackId: _trackId,
@@ -215,9 +232,9 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
     );
 
     return PopScope(
-      canPop: !_fullscreen,
+      canPop: !(isUltratubeDesktop ? immersive : _fullscreen),
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _fullscreen) _toggleFullscreen();
+        if (!didPop) _toggleFullscreen();
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -225,18 +242,50 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
             ? slot
             : SafeArea(
                 bottom: false,
-                child: Column(
-                  children: [
-                    AspectRatio(aspectRatio: 16 / 9, child: slot),
-                    Expanded(child: ColoredBox(color: UT.bg, child: _details())),
-                  ],
-                ),
+                child: !wide
+                    ? Column(
+                        children: [
+                          AspectRatio(aspectRatio: 16 / 9, child: slot),
+                          Expanded(child: ColoredBox(color: UT.bg, child: _details())),
+                        ],
+                      )
+                    // Twitch desktop layout: player + info, chat column on the right.
+                    : ColoredBox(
+                        color: UT.bg,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              child: SingleChildScrollView(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    ConstrainedBox(
+                                      constraints: BoxConstraints(maxHeight: size.height - 180),
+                                      child: AspectRatio(aspectRatio: 16 / 9, child: slot),
+                                    ),
+                                    _details(infoOnly: true),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (_session != null)
+                              Container(
+                                width: size.width >= 1300 ? 380 : 320,
+                                decoration: const BoxDecoration(border: Border(left: BorderSide(color: UT.line))),
+                                child: _details(chatOnly: true),
+                              ),
+                          ],
+                        ),
+                      ),
               ),
       ),
     );
   }
 
-  Widget _details() {
+  /// [header]: only title/channel (wide layout, chat lives in its own column).
+  /// [chatOnly]: only the chat column.
+  Widget _details({bool infoOnly = false, bool chatOnly = false}) {
     final channel = ref.watch(twitchChannelProvider(_login));
     final c = channel.value;
     final header = Padding(
@@ -276,9 +325,24 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
         ],
       ),
     );
+    final others = (c?.videos ?? const <TwitchVideo>[]).where((v) => v.id != widget.vodId).toList();
+    if (infoOnly) {
+      // Wide layout (inside a scroll view): plain column, no slivers.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          if (_session == null && others.isNotEmpty) ...[
+            const Divider(color: UT.line, height: 16),
+            const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 6), child: Text('Mais vídeos do canal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+            for (final v in others) TwitchVodRow(v),
+          ],
+          const SizedBox(height: 120),
+        ],
+      );
+    }
     if (_session == null) {
       // Past broadcast: details + more videos from the channel.
-      final others = (c?.videos ?? const <TwitchVideo>[]).where((v) => v.id != widget.vodId).toList();
       return CustomScrollView(
         slivers: [
           SliverToBoxAdapter(child: header),
@@ -299,7 +363,7 @@ class _TwitchWatchScreenState extends ConsumerState<TwitchWatchScreen> with Widg
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        header,
+        if (!chatOnly) header,
         Container(
           decoration: const BoxDecoration(border: Border(top: BorderSide(color: UT.line), bottom: BorderSide(color: UT.line))),
           padding: const EdgeInsets.only(left: 16),
@@ -487,7 +551,9 @@ class _TwitchVideoSlotState extends ConsumerState<_TwitchVideoSlot> {
     final duration = state.duration.inMilliseconds.toDouble();
     final position = (_drag ?? state.position.inMilliseconds.toDouble()).clamp(0.0, duration <= 0 ? 1.0 : duration);
 
-    return Container(
+    return MouseRegion(
+      onHover: (_) => _controls ? _armHide() : _show(),
+      child: Container(
       key: widget.slotKey,
       color: started && !failed ? Colors.transparent : Colors.black,
       child: Stack(
@@ -681,6 +747,7 @@ class _TwitchVideoSlotState extends ConsumerState<_TwitchVideoSlot> {
           ),
         ],
       ),
+    ),
     );
   }
 }

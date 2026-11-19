@@ -457,7 +457,7 @@ class _AccountHeaderState extends ConsumerState<_AccountHeader> {
               ),
             ],
           ),
-          if (account == null) ...[
+          if (account == null && YoutubeAccountApi.signInSupported) ...[
             const SizedBox(height: UT.s4),
             SizedBox(
               width: double.infinity,

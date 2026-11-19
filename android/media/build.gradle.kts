@@ -10,6 +10,11 @@ dependencies {
     api("androidx.media3:media3-exoplayer:1.5.1")
     api("androidx.media3:media3-session:1.5.1")
     api("androidx.media3:media3-ui:1.5.1")
+    // Lives (YouTube HLS renditions, Twitch) on native surfaces.
+    api("androidx.media3:media3-exoplayer-hls:1.5.1")
+    // Watch-face chip for the playing session.
+    implementation("androidx.wear:wear-ongoing:1.0.0")
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")

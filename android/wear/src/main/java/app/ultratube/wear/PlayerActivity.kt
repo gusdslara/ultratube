@@ -294,7 +294,10 @@ class PlayerActivity : ComponentActivity() {
         flash.animate().cancel(); flash.alpha = 1f; flash.animate().alpha(0f).setStartDelay(450).setDuration(250).start()
     }
 
-    private fun seekBy(ms: Long) = controller?.let { it.seekTo((it.currentPosition + ms).coerceIn(0, it.duration.coerceAtLeast(0))) }
+    private fun seekBy(ms: Long) = controller?.let {
+        if (it.isCurrentMediaItemLive) return@let
+        it.seekTo((it.currentPosition + ms).coerceIn(0, it.duration.coerceAtLeast(0)))
+    }
 
     private fun volume(direction: Int) = audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
         if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
@@ -310,9 +313,15 @@ class PlayerActivity : ComponentActivity() {
         val c = controller ?: return
         val item = c.currentMediaItem ?: return
         val uri = item.requestMetadata.mediaUri ?: return
-        if (uri.scheme != PlaybackService.SCHEME) return toast("Download local")
         val video = !Playback.isVideo(item)
-        val newUri = Uri.parse("${PlaybackService.SCHEME}://${uri.host}" + if (video) "?v=1" else "")
+        val newUri = when {
+            // Twitch: switch rendition (watch-sized video or the audio-only feed).
+            uri.scheme == "twitch" -> Uri.parse("twitch://${uri.host}?q=" + if (video) "360p" else "audio_only")
+            uri.scheme != PlaybackService.SCHEME -> return toast("Download local")
+            // YouTube live keeps its /live path.
+            uri.path == "/live" -> Uri.parse("${PlaybackService.SCHEME}://${uri.host}/live" + if (video) "?v=1" else "")
+            else -> Uri.parse("${PlaybackService.SCHEME}://${uri.host}" + if (video) "?v=1" else "")
+        }
         val replaced = item.buildUpon().setUri(newUri)
             .setRequestMetadata(item.requestMetadata.buildUpon().setMediaUri(newUri).build())
             .setMediaMetadata(item.mediaMetadata.buildUpon().setMediaType(if (video) androidx.media3.common.MediaMetadata.MEDIA_TYPE_VIDEO else androidx.media3.common.MediaMetadata.MEDIA_TYPE_MUSIC).build())
@@ -355,8 +364,10 @@ class PlayerActivity : ComponentActivity() {
         val item = c.currentMediaItem
         val video = Playback.isVideo(item)
         val meta = c.mediaMetadata
-        val duration = c.duration.takeIf { it > 0 } ?: 0L
-        val progress = if (duration > 0) c.currentPosition.toFloat() / duration else 0f
+        val live = c.isCurrentMediaItemLive || item?.requestMetadata?.mediaUri?.let { it.scheme == "twitch" || it.path == "/live" } == true
+        val duration = c.duration.takeIf { it > 0 && !live } ?: 0L
+        // A live has no timeline: full ring instead of a stuck one.
+        val progress = if (live) 1f else if (duration > 0) c.currentPosition.toFloat() / duration else 0f
         val buffered = if (duration > 0) c.bufferedPosition.toFloat() / duration else 0f
         ringNow.progress = progress; ringNow.buffered = buffered
         ringControls.progress = progress; ringControls.buffered = buffered
@@ -371,7 +382,7 @@ class PlayerActivity : ComponentActivity() {
         spinner.visibility = if (c.playbackState == Player.STATE_BUFFERING && c.playWhenReady) View.VISIBLE else View.GONE
 
         ctlTitle.text = meta.title ?: "Nada tocando"
-        ctlTime.text = "${fmt(c.currentPosition)} / ${fmt(duration)}"
+        ctlTime.text = if (live) "● AO VIVO" else "${fmt(c.currentPosition)} / ${fmt(duration)}"
         ctlPlay.setImageResource(if (c.isPlaying || (c.playWhenReady && c.playbackState == Player.STATE_BUFFERING)) R.drawable.ic_pause_fill else R.drawable.ic_play_fill)
         ctlMode.setImageResource(if (video) R.drawable.ic_headphones else R.drawable.ic_video)
         ctlMode.contentDescription = if (video) "Só áudio" else "Assistir vídeo"
@@ -432,6 +443,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        app.ultratube.media.PlaybackService.uiStarted()
         main.post(tick)
         // Screen back on: restore the picture.
         controller?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false).build() }
@@ -443,6 +455,7 @@ class PlayerActivity : ComponentActivity() {
         // Screen off / locked / left the app: keep audio, stop decoding video.
         controller?.let { it.trackSelectionParameters = it.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build() }
         if (::playerView.isInitialized) playerView.player = null
+        app.ultratube.media.PlaybackService.uiStopped()
         super.onStop()
     }
 
