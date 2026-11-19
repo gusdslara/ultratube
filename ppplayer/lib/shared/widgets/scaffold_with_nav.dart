@@ -85,8 +85,8 @@ class _ScaffoldWithNavState extends ConsumerState<ScaffoldWithNav> {
       '/watch',
       '/twitch/watch',
     }.contains(Uri.parse(widget.location).path);
-    // Android phones use the Ultratube shell (YouTube-style nav + mini player).
-    final ultratubeShell = !kIsWeb && Platform.isAndroid;
+    // Ultratube shell (YouTube-style nav + mini player) on phones and desktop.
+    final ultratubeShell = isUltratubePlatform;
     final showQueuePanel =
         ref.watch(queue_ui.queuePanelProvider) &&
         queue_ui.supportsQueuePanel(context) &&
@@ -228,7 +228,7 @@ class _ScaffoldWithNavState extends ConsumerState<ScaffoldWithNav> {
     } else {
       if (showVideo && hasVideoId && ultratubeShell) {
         // Live video lives inside the mini player's thumbnail slot.
-        normalBounds = UtShellMetrics.miniThumbRect(screenSize, stablePadding.bottom);
+        normalBounds = UtShellMetrics.miniThumbRect(screenSize, stablePadding.bottom, rail: isDesktop);
         renderRadius = 6;
       } else if (showVideo && hasVideoId) {
         final left = screenWidth - queueTotalWidth - kMinW - 16;
@@ -250,7 +250,7 @@ class _ScaffoldWithNavState extends ConsumerState<ScaffoldWithNav> {
 
     // Keep both endpoints available while the route reverses on close.
     final collapsedBounds = ultratubeShell
-        ? UtShellMetrics.miniThumbRect(screenSize, stablePadding.bottom)
+        ? UtShellMetrics.miniThumbRect(screenSize, stablePadding.bottom, rail: isDesktop)
         : Rect.fromLTWH(
       screenWidth - queueTotalWidth - kMinW - 16,
       screenSize.height -
@@ -288,7 +288,7 @@ class _ScaffoldWithNavState extends ConsumerState<ScaffoldWithNav> {
         child: Row(
           children: [
             if (isDesktop && !isPlayerScreen && !isPipMode && !isFullscreen)
-              const _DesktopSidebar(),
+              ultratubeShell ? const UtSideNav() : const _DesktopSidebar(),
             Expanded(
               child: Stack(
                 children: [
@@ -395,13 +395,14 @@ class _ScaffoldWithNavState extends ConsumerState<ScaffoldWithNav> {
       ),
       bottomNavigationBar: isPlayerScreen || isPipMode || isFullscreen
           ? null
+          : ultratubeShell
+          // Wide windows navigate from the side rail; the mini player stays.
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [const UtMiniPlayer(), if (!isDesktop) const UtBottomNav()],
+            )
           : isDesktop
           ? const DesktopPlayerBar()
-          : ultratubeShell
-          ? const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [UtMiniPlayer(), UtBottomNav()],
-            )
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [_MiniPlayerBar(), _BottomNavBar()],

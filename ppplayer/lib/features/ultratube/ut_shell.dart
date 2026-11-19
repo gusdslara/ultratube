@@ -22,10 +22,115 @@ abstract final class UtShellMetrics {
   static double miniHeight(Size screen) => compact(screen) ? 50 : 60;
   static Size thumb(Size screen) => compact(screen) ? const Size(76, 43) : const Size(96, 54);
 
-  static Rect miniThumbRect(Size screen, double safeBottom) {
+  /// [rail]: wide layout with [UtSideNav] — no bottom tab bar under the
+  /// mini player.
+  static Rect miniThumbRect(Size screen, double safeBottom, {bool rail = false}) {
     final mini = miniHeight(screen), t = thumb(screen);
-    final miniTop = screen.height - (navHeight(screen) + safeBottom) - miniGap - mini;
+    final nav = rail ? 0.0 : navHeight(screen);
+    final miniTop = screen.height - (nav + safeBottom) - miniGap - mini;
     return Rect.fromLTWH(14, miniTop + (mini - t.height) / 2, t.width, t.height);
+  }
+
+  /// Side navigation width: labelled from 1200 px, icons only below.
+  static double railWidth(Size screen) => screen.width >= 1200 ? 220 : 76;
+}
+
+/// Wide windows (desktop, tablets): YouTube-style side navigation.
+class UtSideNav extends StatelessWidget {
+  const UtSideNav({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final location = GoRouterState.of(context).uri.path;
+    final screen = MediaQuery.sizeOf(context);
+    final width = UtShellMetrics.railWidth(screen);
+    final labelled = width > 100;
+    return Container(
+      width: width,
+      color: UT.bg,
+      padding: const EdgeInsets.fromLTRB(UT.s2, UT.s3, UT.s2, UT.s3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(labelled ? UT.s3 : 0, UT.s2, 0, UT.s5),
+            child: Row(
+              mainAxisAlignment: labelled ? MainAxisAlignment.start : MainAxisAlignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(7),
+                  child: Image.asset('assets/logo.png', width: 28, height: 28, filterQuality: FilterQuality.medium),
+                ),
+                if (labelled) ...[
+                  const SizedBox(width: 8),
+                  const Text('Ultratube', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.8)),
+                ],
+              ],
+            ),
+          ),
+          for (final tab in _tabs)
+            _SideItem(
+              tab: tab,
+              labelled: labelled,
+              selected: location.startsWith(tab.path) ||
+                  (tab.path == '/you' && (location.startsWith('/library') || location.startsWith('/downloads'))),
+            ),
+          const Spacer(),
+          _SideItem(
+            tab: const _Tab('/search', Icons.search, Icons.search, 'Buscar'),
+            labelled: labelled,
+            selected: location.startsWith('/search'),
+            push: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SideItem extends StatelessWidget {
+  const _SideItem({required this.tab, required this.selected, required this.labelled, this.push = false});
+  final _Tab tab;
+  final bool selected;
+  final bool labelled;
+  final bool push;
+  @override
+  Widget build(BuildContext context) {
+    final icon = Icon(selected ? tab.active : tab.icon, size: 24, color: selected ? UT.text : UT.text2);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Tooltip(
+        message: labelled ? '' : tab.label,
+        child: Material(
+          color: selected ? UT.surface2 : Colors.transparent,
+          borderRadius: BorderRadius.circular(UT.rMd),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(UT.rMd),
+            onTap: () => push ? context.push(tab.path) : context.go(tab.path),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: labelled ? UT.s3 : 0, vertical: labelled ? 11 : 10),
+              child: labelled
+                  ? Row(
+                      children: [
+                        icon,
+                        const SizedBox(width: 18),
+                        Text(
+                          tab.label,
+                          style: TextStyle(fontSize: 14, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: selected ? UT.text : UT.text2),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        icon,
+                        const SizedBox(height: 4),
+                        Text(tab.label, maxLines: 1, overflow: TextOverflow.fade, softWrap: false, style: TextStyle(fontSize: 10, color: selected ? UT.text : UT.text2)),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

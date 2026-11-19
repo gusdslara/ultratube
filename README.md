@@ -103,3 +103,37 @@ instalar com Sideloadly/AltStore. No iOS o catálogo é um port em Dart
 
 Ao distribuir um APK, o código-fonte correspondente precisa estar disponível (este repositório).
 Projeto pessoal, sem relação com o Google, o YouTube ou a Twitch.
+
+### Relógio 0.5 e desktop (18/11/2026)
+
+- **Relógio — fim do "processo invisível"**: a notificação de reprodução agora
+  é uma *Ongoing Activity* do Wear OS (ícone do Ultratube no mostrador enquanto
+  toca, que leva de volta ao player) com Pausar/Próxima/**Parar**. Fechar o app
+  (voltar na tela inicial ou remover dos recentes) para a música e encerra o
+  serviço; sair pela coroa continua tocando, com o ícone para voltar. Pausado
+  e sem nenhuma tela do Ultratube aberta, o serviço se encerra sozinho em 5 min.
+- **Correção Android 16 (Galaxy Watch 7)**: com o voltar preditivo o
+  `onBackPressed` nunca era chamado — o voltar das sub-telas saía do app e
+  fechar não parava nada. Agora usa `OnBackInvokedDispatcher`.
+- **Relógio — Twitch e lives do YouTube**: "Twitch ao vivo" (mais vistas em
+  português + busca de canal) e "Lives do YouTube". Twitch toca em vídeo 360p
+  (segure para só áudio) com o mesmo filtro de anúncios do celular, portado
+  para Kotlin (`android/media/.../Twitch.kt`, servido ao ExoPlayer como
+  playlist gerada). Lives do YouTube tocam uma variante HLS + áudio. O player
+  mostra "● AO VIVO" e alterna vídeo/só áudio também em lives.
+- Validado no Galaxy Watch 7 (Android 16): Twitch em vídeo, 60 s no mostrador
+  continuando a tocar com o ícone, voltar das sub-telas, fechar → serviço e
+  notificação encerrados; live do YouTube em vídeo.
+- **Desktop (Windows, macOS, Linux)**: o shell do Ultratube (feed, Twitch,
+  chat ao vivo, Perguntar, player próprio com MediaKit e catálogo Dart) agora
+  roda no desktop. Janelas largas usam barra lateral (com rótulos a partir de
+  1200 px) e mini player; a tela Assistir limita o player à altura da janela e
+  leva "A seguir" para uma coluna lateral a partir de 1280 px; na Twitch o chat
+  vira coluna à direita. Paisagem só vira tela cheia no celular; no desktop é o
+  botão ou a tecla F (tela cheia real da janela), Espaço pausa, e passar o mouse
+  mostra os controles. Login Google fica só no celular (precisa do WebView nativo).
+- Builds desktop: workflow manual "Ultratube Desktop" (`.github/workflows/
+  ultratube-desktop.yml`) gera Windows x64 (.zip), Linux x64 (.tar.gz) e macOS
+  (.app com assinatura ad-hoc). Compilar Windows localmente exige o Modo de
+  Desenvolvedor do Windows (links simbólicos dos plugins); por isso a interface
+  desktop ainda não foi vista rodando.

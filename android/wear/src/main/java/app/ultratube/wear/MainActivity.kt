@@ -35,6 +35,7 @@ import app.ultratube.media.Catalog
 import app.ultratube.media.Downloads
 import app.ultratube.media.Playback
 import app.ultratube.media.PlaybackService
+import app.ultratube.media.Twitch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -45,7 +46,7 @@ import java.util.concurrent.Executors
  * rotary-scrollable column, sized for round 1.2–1.5" displays.
  */
 class MainActivity : Activity() {
-    private enum class Screen { HOME, SEARCH, RESULTS, DOWNLOADS, QUEUE, LYRICS }
+    private enum class Screen { HOME, SEARCH, RESULTS, DOWNLOADS, QUEUE, LYRICS, TWITCH }
 
     private val io = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
@@ -95,6 +96,11 @@ class MainActivity : Activity() {
         scroll.addView(content)
         setContentView(scroll)
         connection = Playback.connect(this) { c -> controller = c; c.addListener(listener); refreshNowPlaying() }
+        // Android 13+ (predictive back, default from API 35/36) never calls
+        // onBackPressed: route back/swipe-to-dismiss through the dispatcher.
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
+        }
         showHome()
     }
 
@@ -146,6 +152,8 @@ class MainActivity : Activity() {
         pill("Buscar por voz", R.drawable.ic_mic) { voiceSearch() }
         pill("Digitar busca", R.drawable.ic_keyboard) { showSearch() }
         pill("Shorts", R.drawable.ic_shorts) { startShorts() }
+        pill("Twitch ao vivo", R.drawable.ic_twitch) { showTwitch() }
+        pill("Lives do YouTube", R.drawable.ic_live) { youtubeLives() }
         pill("Downloads", R.drawable.ic_download) { showDownloads() }
         pill("Favoritos", R.drawable.ic_heart) { showResults("Favoritos", favorites()) }
         pill("Fila", R.drawable.ic_list) { showQueue() }
@@ -293,6 +301,73 @@ class MainActivity : Activity() {
             body.text = it.optString("plainLyrics").ifBlank { "Letra indisponível" }
         }
     }
+
+    /** Twitch: most watched lives in Portuguese, plus channel search. */
+    private fun showTwitch(query: String = "") {
+        reset(Screen.TWITCH, 22)
+        header(if (query.isBlank()) "Twitch" else query)
+        pill("Buscar canal", R.drawable.ic_keyboard) { askTwitchChannel() }
+        val loading = label(if (query.isBlank()) "Carregando lives…" else "Buscando…", 13, MUTED)
+        work({ if (query.isBlank()) Twitch.top("pt") else Twitch.search(query) }, onError = { error ->
+            loading.text = "Não foi possível falar com a Twitch.\n($error)"
+            pill("Tentar de novo", R.drawable.ic_twitch, primary = true) { showTwitch(query) }
+        }) { items ->
+            content.removeView(loading)
+            if (items.length() == 0) { empty("Ninguém ao vivo agora."); return@work }
+            hint("Sem anúncios · toque para assistir · segure para só áudio")
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val live = item.optBoolean("live")
+                val subtitle = if (!live) "Offline" else listOf(item.optString("artist"), viewers(item.optInt("viewers", -1)), item.optString("game"))
+                    .filter { it.isNotBlank() }.joinToString(" · ")
+                row(item.optString("title"), subtitle, item.optString("cover"),
+                    onClick = { if (live) playTwitch(item, video = true) else toast("Canal offline") },
+                    onLongClick = { if (live) playTwitch(item, video = false) })
+            }
+        }
+    }
+
+    private fun askTwitchChannel() {
+        val input = EditText(this).apply {
+            hint = "Nome do canal"; setSingleLine(); setTextColor(Color.WHITE); setHintTextColor(MUTED)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+        }
+        val dialog = AlertDialog.Builder(this).setView(input).create()
+        input.setOnEditorActionListener { v, _, _ ->
+            dialog.dismiss()
+            val q = v.text.toString().trim()
+            if (q.isNotEmpty()) showTwitch(q)
+            true
+        }
+        dialog.show()
+        input.requestFocus()
+    }
+
+    private fun playTwitch(item: JSONObject, video: Boolean) {
+        val c = controller ?: return toast("Player indisponível")
+        Playback.playAll(c, listOf(Playback.twitch(item, video)), 0)
+        if (video) PlayerActivity.open(this) else showHome()
+    }
+
+    /** YouTube broadcasts happening now (search filtered to lives). */
+    private fun youtubeLives() {
+        reset(Screen.RESULTS); header("Lives")
+        val loading = label("Buscando lives…", 13, MUTED)
+        work({
+            val all = Catalog.search("ao vivo agora", music = false)
+            JSONArray((0 until all.length()).map { all.getJSONObject(it) }.filter { it.optBoolean("live") })
+        }, onError = { error ->
+            loading.text = "Não foi possível buscar lives.\n($error)"
+            pill("Tentar de novo", R.drawable.ic_live, primary = true) { youtubeLives() }
+        }) { showResults("Lives", it, video = true) }
+    }
+
+    private fun viewers(n: Int): String = when {
+        n < 0 -> ""
+        n >= 1_000_000 -> "%.1f mi".format(n / 1e6).replace('.', ',')
+        n >= 1_000 -> "%.1f mil".format(n / 1e3).replace('.', ',').replace(",0 mil", " mil")
+        else -> "$n"
+    } + if (n >= 0) " assistindo" else ""
 
     // --------------------------------------------------------------- actions
 
@@ -554,13 +629,33 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("Platform callback")
-    override fun onBackPressed() {
-        if (screen == Screen.HOME) super.onBackPressed() else showHome()
+    override fun onBackPressed() = handleBack()
+
+    private fun handleBack() {
+        if (screen != Screen.HOME) return showHome()
+        closeApp()
     }
 
-    override fun onStart() { super.onStart(); Downloads.addListener(downloadsChanged); main.post(tick) }
-    override fun onStop() { main.removeCallbacks(tick); Downloads.removeListener(downloadsChanged); super.onStop() }
+    /**
+     * Leaving with back = closing Ultratube: stop the music and the background
+     * service. (The crown/home button keeps playing, with the Ongoing Activity
+     * chip on the watch face to come back or stop.)
+     */
+    private var closed = false
+    private fun closeApp() {
+        if (closed) return
+        closed = true
+        controller?.let { it.stop(); it.clearMediaItems() }
+        PlaybackService.stop(this)
+        finishAndRemoveTask()
+    }
+
+    override fun onStart() { super.onStart(); PlaybackService.uiStarted(); Downloads.addListener(downloadsChanged); main.post(tick) }
+    override fun onStop() { main.removeCallbacks(tick); Downloads.removeListener(downloadsChanged); PlaybackService.uiStopped(); super.onStop() }
     override fun onDestroy() {
+        // Finished by the user (not a rotation/low-memory recreation): any
+        // way out of the app also ends playback.
+        if (isFinishing && !isChangingConfigurations) closeApp()
         generation++
         controller?.removeListener(listener)
         connection?.let { MediaController.releaseFuture(it) }
