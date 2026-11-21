@@ -21,6 +21,9 @@ import org.schabi.newpipe.extractor.comments.CommentsInfoItem
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
+import org.schabi.newpipe.extractor.exceptions.ContentNotAvailableException
+import org.schabi.newpipe.extractor.exceptions.ParsingException
+import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager
 import org.schabi.newpipe.extractor.feed.FeedInfo
 import org.schabi.newpipe.extractor.kiosk.KioskInfo
 import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler
@@ -33,6 +36,8 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.stream.VideoStream
+import android.util.Log
+import java.io.IOException
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -59,11 +64,49 @@ object Catalog {
                     .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36")
                 request.headers().forEach { (key, values) -> values.forEach { builder.addHeader(key, it) } }
                 builder.method(request.httpMethod(), request.dataToSend()?.toRequestBody())
-                http.newCall(builder.build()).execute().use {
-                    return Response(it.code, it.message, it.headers.toMultimap(), it.body?.string(), it.request.url.toString())
+                val call = builder.build()
+                // Sockets die while the phone sleeps and the radio needs a
+                // moment after unlock: retry plain I/O failures with backoff.
+                var attempt = 0
+                while (true) {
+                    try {
+                        http.newCall(call).execute().use {
+                            return Response(it.code, it.message, it.headers.toMultimap(), it.body?.string(), it.request.url.toString())
+                        }
+                    } catch (e: IOException) {
+                        if (++attempt >= NET_RETRIES) throw e
+                        Thread.sleep(NET_BACKOFF_MS * attempt)
+                    }
                 }
             }
         }, Localization(locale.language.ifBlank { "pt" }, locale.country.ifBlank { "BR" }), ContentCountry(locale.country.ifBlank { "BR" }))
+    }
+
+    private const val NET_RETRIES = 3
+    private const val NET_BACKOFF_MS = 700L
+
+    /**
+     * Content the viewer can never play (private, removed, age/region/paid).
+     * Everything else (network, YouTube hiccups, stale player JS) is retried.
+     */
+    fun isPermanent(e: Throwable): Boolean = e is ContentNotAvailableException
+
+    /**
+     * Runs a watch-page extraction, retrying transient failures. A parsing
+     * failure usually means YouTube rotated its player JS: drop NewPipe's
+     * cached deobfuscation code before trying again.
+     */
+    private fun <T> extract(block: () -> T): T {
+        var attempt = 0
+        while (true) {
+            try {
+                return block()
+            } catch (e: Exception) {
+                if (isPermanent(e) || e is IllegalArgumentException || ++attempt >= 3) throw e
+                if (e is ParsingException) runCatching { YoutubeJavaScriptPlayerManager.clearAllCaches() }
+                Thread.sleep(NET_BACKOFF_MS * attempt)
+            }
+        }
     }
 
     // ------------------------------------------------------------ pagination
@@ -220,7 +263,11 @@ object Catalog {
     /** Watch-page details: metadata, channel, description and "up next". */
     fun video(url: String): JSONObject {
         checkUrl(url)
-        val info = StreamInfo.getInfo(service, url)
+        val info = try {
+            extract { StreamInfo.getInfo(service, url) }
+        } catch (e: ContentNotAvailableException) {
+            return PlayerFallback.details(videoId(url)) ?: throw e
+        }
         return JSONObject().put("url", info.url).put("id", info.id).put("title", info.name)
             .put("channel", info.uploaderName ?: "").put("artist", artistName(info.uploaderName))
             .put("channelUrl", info.uploaderUrl ?: "").put("channelAvatar", best(info.uploaderAvatars, 88))
@@ -237,7 +284,7 @@ object Catalog {
     /** "Up next" items for endless autoplay; live streams and Shorts excluded. */
     fun related(url: String): JSONArray {
         checkUrl(url)
-        val info = StreamInfo.getInfo(service, url)
+        val info = extract { StreamInfo.getInfo(service, url) }
         return JSONArray(info.relatedItems.filterIsInstance<StreamInfoItem>()
             .filter { it.duration > 0 && !it.isShortFormContent }.take(20).mapNotNull(::item))
     }
@@ -254,9 +301,37 @@ object Catalog {
      * separate video-only track (up to [maxHeight]) plus an `audio` track,
      * which is how YouTube serves anything above 360p.
      */
-    fun resolve(url: String, video: Boolean, maxHeight: Int = 1080): JSONObject {
+    fun resolve(url: String, video: Boolean, maxHeight: Int = 1080, fast: Boolean = false): JSONObject {
         checkUrl(url)
-        val info = StreamInfo.getInfo(service, url)
+        val started = System.currentTimeMillis()
+        // Shorts: one request to the app client's player API answers in a
+        // third of the time of a full watch-page extraction, with direct
+        // URLs. Anything it cannot play falls through to NewPipe below.
+        if (fast) {
+            runCatching { PlayerFallback.resolve(videoId(url), video, maxHeight) }.getOrNull()
+                ?.takeIf { !it.optBoolean("live") && it.optString("stream").startsWith("https://") }
+                ?.let {
+                    Log.i(TAG, "resolve ${videoId(url)} fast via ${it.optString("client")} (${System.currentTimeMillis() - started} ms)")
+                    return it.put("url", url)
+                }
+        }
+        val info = try {
+            extract { StreamInfo.getInfo(service, url) }
+        } catch (e: ContentNotAvailableException) {
+            // NewPipe asks YouTube as a client it now refuses for many Shorts
+            // and some videos ("UNPLAYABLE: This video is not available").
+            // The same video usually plays for the iOS/Android app clients.
+            val fallback = PlayerFallback.resolve(videoId(url), video, maxHeight) ?: throw e
+            Log.i(TAG, "resolve ${videoId(url)} via ${fallback.optString("client")} after \"${e.message}\" (${System.currentTimeMillis() - started} ms)")
+            fallback.optString("hls").takeIf { fallback.optBoolean("live") && it.isNotEmpty() }?.let { hls ->
+                runCatching { liveRendition(hls, maxHeight, video) }.getOrNull()?.let { (stream, audio, height) ->
+                    fallback.put("stream", stream).put("height", height)
+                    if (audio != null) fallback.put("audio", audio) else fallback.remove("audio")
+                }
+            }
+            return fallback.put("url", url)
+        }
+        Log.i(TAG, "resolve ${info.id} (${System.currentTimeMillis() - started} ms)")
         val result = JSONObject().put("url", url).put("title", info.name)
             .put("artist", artistName(info.uploaderName)).put("cover", hd(best(info.thumbnails, 4000)))
             .put("duration", info.duration)
@@ -287,12 +362,15 @@ object Catalog {
             require(!stream.isNullOrBlank()) { "Áudio indisponível para este conteúdo." }
             return result.put("stream", stream)
         }
-        val videoOnly = info.videoOnlyStreams.filter { it.isUrl && it.height in 1..maxHeight }
+        // Quality is the short side, as YouTube labels it: a vertical 1080p
+        // Short is 1080x1920 and must not be capped down to 480p by its height.
+        fun quality(s: VideoStream) = if (s.width > 0 && s.height > 0) minOf(s.width, s.height) else s.height
+        val videoOnly = info.videoOnlyStreams.filter { it.isUrl && quality(it) in 1..maxHeight }
             // Prefer H.264 (hardware decoded everywhere), then the highest resolution/fps.
-            .maxWithOrNull(compareBy<VideoStream>({ it.height }, { if (it.format == MediaFormat.MPEG_4) 1 else 0 }, { it.fps }))
-        val muxed = info.videoStreams.filter { it.isUrl }.maxByOrNull { it.height }
+            .maxWithOrNull(compareBy<VideoStream>({ quality(it) }, { if (it.format == MediaFormat.MPEG_4) 1 else 0 }, { it.fps }))
+        val muxed = info.videoStreams.filter { it.isUrl }.maxByOrNull { quality(it) }
         return when {
-            videoOnly != null && audio != null && videoOnly.height > (muxed?.height ?: 0) ->
+            videoOnly != null && audio != null && quality(videoOnly) > (muxed?.let(::quality) ?: 0) ->
                 result.put("stream", videoOnly.content).put("audio", audio.content).put("height", videoOnly.height)
             muxed != null -> result.put("stream", muxed.content).put("height", muxed.height)
             hls != null -> result.put("stream", hls).put("height", 0)
@@ -372,6 +450,10 @@ object Catalog {
 
     /** YouTube's auto-generated music channels are named "<Artist> - Topic". */
     fun artistName(uploader: String?) = uploader.orEmpty().removeSuffix(" - Topic").trim()
+
+    private const val TAG = "UltratubeCatalog"
+
+    private fun videoId(url: String): String = service.streamLHFactory.getId(url)
 
     private fun checkUrl(url: String) {
         val parsed = url.toHttpUrl()

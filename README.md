@@ -6,7 +6,7 @@ playlists e downloads ficam no próprio aparelho.
 
 | App | Pacote | Versão | Testado em |
 |---|---|---|---|
-| Celular (Flutter) | `app.ultratube.mobile` | 1.0.3 | Galaxy S23 |
+| Celular (Flutter) | `app.ultratube.mobile` | 1.0.4 | Galaxy S23 |
 | Relógio (Kotlin, Wear OS) | `app.ultratube.wear` | 0.4.1 | Galaxy Watch 7 (SM-L300) |
 
 ## De onde veio
@@ -34,6 +34,7 @@ O app do relógio e a biblioteca `android/media` são **código novo**, escritos
 - **Downloads offline**: áudio M4A ou vídeo 720p/1080p (sem recodificar), com capa e fila em
   segundo plano.
 - **Lives do YouTube** com chat ao vivo sobre o vídeo e contador de espectadores.
+- **Conta da Twitch (opcional)**: entra por código em twitch.tv/activate e traz os canais seguidos.
 - **Twitch sem anúncios**: aba própria (seguindo, ao vivo, categorias, VODs, chat com emotes
   7TV/BTTV). Um proxy HLS local remove os intervalos comerciais.
 - **Perguntar (Gemini)**: resumo e explicação do vídeo com marcas de tempo clicáveis, usando a

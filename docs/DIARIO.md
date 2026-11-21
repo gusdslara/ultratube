@@ -282,3 +282,41 @@ Ultratube antes de substituir identidade, assinatura, ícones e endpoints de atu
   emotes, badges, contador), legendas para o Perguntar. `flutter analyze`: 0
   erros. Falta validar no S23: reprodução das lives no MediaKit, overlay e
   gestos, e o Perguntar com uma chave real.
+
+### Celular 1.0.4 — Shorts e Início rápidos, conta e voltar (21/11/2026)
+
+- **Voltar fechava o app (Android 16)**: com targetSdk 36 o `onBackPressed` não é
+  mais chamado e o Flutter só registra o `OnBackInvokedCallback` quando o
+  framework avisa que há algo para voltar; esse aviso se perdia e o sistema
+  fechava a activity. `MainActivity` mantém o callback sempre registrado, então
+  o voltar sempre chega ao Flutter. Numa aba que não é o Início, voltar leva ao
+  Início; só no Início ele sai do app (`_TabBack` em `app_router.dart`). A tela
+  de login do Google também passou a usar o dispatcher novo.
+- **Shorts — feed real**: a aba usa o feed de Shorts do próprio YouTube
+  (`reel/reel_item_watch` + `reel/reel_watch_sequence`), personalizado com a
+  conta conectada e regional sem conta; a busca por temas ficou como reserva.
+  Abrir a aba custava 4 buscas com várias páginas; agora são 2 chamadas leves.
+- **Shorts — troca rápida**: os 2 próximos Shorts são preparados enquanto o atual
+  toca (URL resolvida, capa em cache, título e contadores). Shorts resolvem
+  primeiro pelo cliente do app iOS (1 chamada, ~0,45 s contra ~1,2 s da extração
+  completa), com o NewPipe como reserva.
+- **Shorts — comentários e curtidas**: botão de comentários com a contagem real,
+  painel de comentários paginado, curtidas reais no botão (que salva em Curtidos).
+- **Início**: abre na hora com a última página salva (até 10 min sem recarregar;
+  depois mostra a salva e atualiza por trás). Sem conta, cada fonte aparece assim
+  que chega em vez de esperar a mais lenta ("a seguir" do histórico, que exige
+  extração completa, vai por último). Com conta, "Para você" é o Início do
+  YouTube da conta, na ordem do YouTube, com a prateleira de Shorts dela.
+- **Twitch — conta**: entrar pelo código de dispositivo (twitch.tv/activate; a
+  senha nunca passa pelo app). Os canais seguidos na conta entram em "Seguindo"
+  e são sincronizados ao abrir e ao puxar para atualizar. Tokens no keystore.
+- **Twitch — busca e categorias**: sugestões ao digitar, buscas recentes,
+  categorias em alta, resultados com filtros (Tudo, Canais, Categorias, Ao vivo,
+  Vídeos). Categoria com ordenação, gêneros e aba de vídeos; aba Categorias com
+  filtro por gênero; prateleira de categorias em "Ao vivo agora".
+- Verificado: `flutter analyze` sem erros; testes novos de Dart (feed de Shorts,
+  API da Twitch) e de Kotlin (parser de Shorts contra respostas reais do
+  YouTube); APIs conferidas contra os serviços reais (`tool/reels_probe.dart`,
+  `tool/twitch_probe.dart`); APK release compila. **Falta validar no S23**: voltar,
+  tempo de troca dos Shorts, feed da conta e o login da Twitch com conta real.
+  `playback_providers_test` já falhava antes (2 testes do PPPlayer original).

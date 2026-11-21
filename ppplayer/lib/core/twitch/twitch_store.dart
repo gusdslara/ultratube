@@ -41,6 +41,17 @@ class TwitchFollowsNotifier extends Notifier<List<TwitchFollow>> {
     }
   }
 
+  /// Adds channels not followed yet (account import). Returns how many.
+  int merge(Iterable<TwitchFollow> channels) {
+    final known = {for (final f in state) f.login};
+    final added = [
+      for (final c in channels)
+        if (TwitchApi.validLogin(c.login) && known.add(c.login.toLowerCase())) c,
+    ];
+    if (added.isNotEmpty) _save([...state, ...added]);
+    return added.length;
+  }
+
   /// Keeps names/avatars fresh when a lookup returns newer data.
   void refresh(Iterable<TwitchChannel> channels) {
     final byLogin = {for (final c in channels) c.login.toLowerCase(): c};
@@ -129,3 +140,25 @@ String? twitchRouteFor(Track track) {
   if (id.startsWith('twitchvod:')) return '/twitch/watch?vod=${id.substring(10)}&c=${track.artistId.replaceFirst('twitch:', '')}';
   return null;
 }
+
+/// Recent Twitch searches, newest first.
+class TwitchSearchHistoryNotifier extends Notifier<List<String>> {
+  static const _key = 'twitchSearches';
+  @override
+  List<String> build() => [
+    for (final s in (UltratubeStore.box.get(_key, defaultValue: const <dynamic>[]) as List)) s as String,
+  ];
+  void add(String query) {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    state = [q, ...state.where((s) => s.toLowerCase() != q.toLowerCase())].take(12).toList();
+    UltratubeStore.box.put(_key, state);
+  }
+
+  void remove(String query) {
+    state = [...state.where((s) => s != query)];
+    UltratubeStore.box.put(_key, state);
+  }
+}
+
+final twitchSearchHistoryProvider = NotifierProvider<TwitchSearchHistoryNotifier, List<String>>(TwitchSearchHistoryNotifier.new);

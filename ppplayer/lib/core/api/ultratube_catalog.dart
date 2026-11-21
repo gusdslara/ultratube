@@ -34,6 +34,10 @@ class UltratubeCatalog {
         Map<String, dynamic>.from(await _call(method, args) as Map),
       );
 
+  /// Video ids known to be Shorts. They resolve through the quicker app
+  /// client first (one request instead of a full watch-page extraction).
+  static final fastIds = <String>{};
+
   /// Playable URLs. Video mode may return a separate `audio` track.
   Future<Map<String, dynamic>> resolve(
     String videoId, {
@@ -48,6 +52,7 @@ class UltratubeCatalog {
             'url': 'https://www.youtube.com/watch?v=$videoId',
             'video': video,
             'maxHeight': maxHeight,
+            'fast': fastIds.contains(videoId),
           })
           as Map,
     );

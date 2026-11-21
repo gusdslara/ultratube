@@ -65,17 +65,77 @@ abstract class _PagedFeed extends Notifier<FeedState> {
   final _seen = <String>{};
   int _generation = 0;
 
+  /// Hive key of the last loaded page, shown at once on the next start.
+  String? get cacheKey => null;
+
+  /// A cached page this recent is shown as is; an older one is shown while
+  /// a fresh page loads behind it.
+  static const _freshFor = Duration(minutes: 10);
+  static const _keepFor = Duration(days: 2);
+
   @override
   FeedState build() {
+    final cached = _readCache();
+    if (cached != null) {
+      final (age, items) = cached;
+      resetCursors();
+      _seen.addAll([for (final i in items) i.videoId ?? i.url]);
+      // A page that cannot continue from the cache (no cursor) reloads too.
+      final stale = age > _freshFor || !canLoadMore;
+      if (stale) Future.microtask(refresh);
+      return FeedState(
+        videos: [for (final i in items) if (!i.shorts) i],
+        shorts: [for (final i in items) if (i.shorts) i],
+        loading: stale,
+        hasMore: true,
+      );
+    }
     Future.microtask(refresh);
     return const FeedState(loading: true);
   }
 
-  Future<List<YtItem>> first();
+  /// The first page, in as many batches as it has sources: each batch is
+  /// shown as soon as it arrives instead of waiting for the slowest one.
+  Stream<List<YtItem>> first();
   Future<List<YtItem>> next();
   bool get canLoadMore;
 
-  void _append(List<YtItem> items, {bool reset = false}) {
+  /// Back to page one (also called before continuing from a cached page).
+  void resetCursors() {}
+
+  (Duration, List<YtItem>)? _readCache() {
+    final key = cacheKey;
+    if (key == null) return null;
+    try {
+      final raw = UltratubeStore.box.get('feedCache:$key');
+      if (raw is! Map) return null;
+      final age = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(raw['at'] as int));
+      if (age.isNegative || age > _keepFor) return null;
+      final items = [for (final e in raw['items'] as List) YtItem.fromJson(Map<String, dynamic>.from(e as Map))];
+      return items.where((i) => !i.shorts).length < 4 ? null : (age, items);
+    } catch (error) {
+      debugPrint('Ultratube: feed cache unreadable ($error)');
+      return null;
+    }
+  }
+
+  void _writeCache() {
+    final key = cacheKey;
+    if (key == null || state.videos.isEmpty) return;
+    try {
+      UltratubeStore.box.put('feedCache:$key', {
+        'at': DateTime.now().millisecondsSinceEpoch,
+        'items': [
+          for (final i in state.videos.take(40)) i.toJson(),
+          for (final i in state.shorts.take(20)) i.toJson(),
+        ],
+      });
+    } catch (error) {
+      debugPrint('Ultratube: feed cache not saved ($error)');
+    }
+  }
+
+  void _append(List<YtItem> items, {bool reset = false, bool loading = false}) {
     final videos = reset ? <YtItem>[] : [...state.videos];
     final shorts = reset ? <YtItem>[] : [...state.shorts];
     for (final item in items) {
@@ -84,16 +144,26 @@ abstract class _PagedFeed extends Notifier<FeedState> {
       if (item.kind != YtKind.video) continue;
       (item.shorts ? shorts : videos).add(item);
     }
-    state = state.copyWith(videos: videos, shorts: shorts, loading: false, error: null, hasMore: canLoadMore);
+    state = state.copyWith(videos: videos, shorts: shorts, loading: loading, error: null, hasMore: canLoadMore);
   }
 
   Future<void> refresh() async {
     final generation = ++_generation;
-    _seen.clear();
     state = state.copyWith(loading: true, error: null);
+    var shown = false;
     try {
-      final items = await first();
-      if (generation == _generation) _append(items, reset: true);
+      await for (final batch in first()) {
+        if (generation != _generation) return;
+        if (batch.isEmpty) continue;
+        // What is on screen (a cached page) stays until the first batch lands.
+        if (!shown) _seen.clear();
+        _append(batch, reset: !shown, loading: true);
+        shown = true;
+      }
+      if (generation != _generation) return;
+      if (!shown) throw StateError('Sem conexão com o YouTube agora');
+      state = state.copyWith(loading: false, hasMore: canLoadMore);
+      _writeCache();
     } catch (error) {
       if (generation == _generation) state = state.copyWith(loading: false, error: '$error');
     }
@@ -118,12 +188,14 @@ class KioskFeed extends _PagedFeed {
   final String id;
   String? _next;
   @override
+  String get cacheKey => 'kiosk:$id';
+  @override
   bool get canLoadMore => _next != null;
   @override
-  Future<List<YtItem>> first() async {
+  Stream<List<YtItem>> first() async* {
     final page = await _catalog.kiosk(id);
     _next = page.next;
-    return page.items;
+    yield page.items;
   }
 
   @override
@@ -136,32 +208,58 @@ class KioskFeed extends _PagedFeed {
 
 final kioskFeedProvider = NotifierProvider.family<KioskFeed, FeedState, String>(KioskFeed.new);
 
-/// "Para você": recent uploads from subscriptions, "up next" of recently
-/// watched videos and what's trending, interleaved and de-duplicated.
-/// Everything is computed on-device from local history.
+/// "Para você". Signed in: the account's own YouTube home, in YouTube's
+/// order. Signed out: recent uploads from subscriptions, "up next" of
+/// recently watched videos and the category charts, computed on-device.
 class ForYouFeed extends _PagedFeed {
   final _random = Random();
   int _historyCursor = 0;
   String? _trendingNext;
   bool _trendingDone = false;
+  int _kioskCursor = 0;
+  String? _homeNext;
+  bool _homeDone = false;
+
+  @override
+  String get cacheKey => 'forYou';
+
+  @override
+  FeedState build() {
+    // Signing in or out changes what "Para você" is.
+    ref.listen(youtubeAccountProvider, (prev, next) {
+      if ((prev == null) != (next == null)) refresh();
+    });
+    return super.build();
+  }
+
+  bool get _signedIn => ref.read(youtubeAccountProvider) != null;
 
   Set<String> get _watched => {for (final h in ref.read(historyProvider)) h.videoId ?? ''};
 
-  String? _homeNext;
-  bool _homeDone = true;
+  @override
+  bool get canLoadMore =>
+      (_signedIn && !_homeDone) || _historyCursor < ref.read(historyProvider).length || !_trendingDone;
 
   @override
-  bool get canLoadMore => _historyCursor < ref.read(historyProvider).length || !_trendingDone || !_homeDone;
+  void resetCursors() {
+    _historyCursor = 0;
+    _kioskCursor = 0;
+    _trendingNext = null;
+    _trendingDone = false;
+    _homeNext = null;
+    _homeDone = false;
+  }
 
-  /// The signed-in account's own YouTube recommendations (empty when signed out).
+  /// The signed-in account's own YouTube recommendations, videos and Shorts
+  /// (empty when signed out).
   Future<List<YtItem>> _youtubeHome() async {
-    if (ref.read(youtubeAccountProvider) == null) _homeDone = true;
+    if (!_signedIn) _homeDone = true;
     if (_homeDone) return const [];
     try {
       final page = await YoutubeAccountNotifier.api.home(_homeNext);
       _homeNext = page.next;
       _homeDone = page.next == null;
-      return page.items.where((i) => !i.shorts && i.videoId != null).toList();
+      return page.items.where((i) => i.videoId != null).toList();
     } catch (error) {
       debugPrint('Ultratube: recomendações da conta indisponíveis: $error');
       _homeDone = true;
@@ -178,8 +276,6 @@ class ForYouFeed extends _PagedFeed {
     );
     return [for (final r in results) ...r];
   }
-
-  int _kioskCursor = 0;
 
   /// Popular videos: walks the available category charts (music, live,
   /// gaming…), moving to the next one when a chart fails or runs out.
@@ -244,22 +340,52 @@ class ForYouFeed extends _PagedFeed {
   }
 
   @override
-  Future<List<YtItem>> first() async {
-    _historyCursor = 0;
-    _kioskCursor = 0;
-    _trendingNext = null;
-    _trendingDone = false;
-    _homeNext = null;
-    _homeDone = false;
-    final results = await Future.wait([_youtubeHome(), _subscriptions(), _related(4), _trending()]);
-    var mixed = _mix(results);
-    if (mixed.isEmpty) mixed = _mix([await _searchSeeds()]);
-    if (mixed.isEmpty) throw StateError('Sem conexão com o YouTube agora');
-    return mixed;
+  Stream<List<YtItem>> first() async* {
+    resetCursors();
+    if (_signedIn) {
+      // One request, already ranked by YouTube for this account.
+      final home = await _youtubeHome();
+      if (home.isNotEmpty) {
+        yield home;
+        return;
+      }
+    }
+    // Signed out (or the account feed failed): every source is shown as it
+    // lands. Subscriptions and charts take one or two requests; "up next"
+    // of watched videos needs a full extraction each, so it goes last
+    // instead of holding the page back.
+    final sources = StreamController<List<YtItem>>();
+    var pending = 2;
+    for (final source in [_subscriptions(), _trending()]) {
+      unawaited(
+        source.then((items) => sources.add(items), onError: (Object _) {}).whenComplete(() {
+          if (--pending == 0) sources.close();
+        }),
+      );
+    }
+    var shown = false;
+    await for (final items in sources.stream) {
+      final mixed = _mix([items]);
+      if (mixed.isEmpty) continue;
+      shown = true;
+      yield mixed;
+    }
+    final related = _mix([await _related(2)]);
+    if (related.isNotEmpty) {
+      shown = true;
+      yield related;
+    }
+    if (!shown) yield _mix([await _searchSeeds()]);
   }
 
   @override
-  Future<List<YtItem>> next() async => _mix(await Future.wait([_youtubeHome(), _related(3), _trending()]));
+  Future<List<YtItem>> next() async {
+    if (_signedIn && !_homeDone) {
+      final home = await _youtubeHome();
+      if (home.isNotEmpty) return home;
+    }
+    return _mix(await Future.wait([_related(3), _trending()]));
+  }
 }
 
 final forYouFeedProvider = NotifierProvider<ForYouFeed, FeedState>(ForYouFeed.new);
@@ -327,6 +453,33 @@ Future<List<YtItem>> discoverShorts(Ref ref, {int page = 0}) async {
   return out;
 }
 
-final shortsDiscoveryProvider = Provider<Future<List<YtItem>> Function(int page)>(
-  (ref) => (page) => discoverShorts(ref, page: page),
-);
+/// Source of the vertical Shorts player. Prefers YouTube's own Shorts feed
+/// (the signed-in account's, else the regional one), two light requests per
+/// page; falls back to searching topics the viewer watches when the feed is
+/// unavailable or runs out.
+class ShortsFeed {
+  ShortsFeed(this._ref);
+  final Ref _ref;
+  String? _token;
+  bool _real = true;
+  int _searchPage = 0;
+
+  Future<List<YtItem>> next() async {
+    if (_real) {
+      try {
+        final page = await YoutubeAccountNotifier.api.shorts(_token);
+        _token = page.next;
+        _real = page.next != null;
+        final items = page.items.where((i) => i.videoId != null).toList();
+        if (items.isNotEmpty) return items;
+      } catch (error) {
+        debugPrint('Ultratube: feed de Shorts indisponível, usando busca: $error');
+      }
+      _real = false;
+    }
+    return discoverShorts(_ref, page: _searchPage++);
+  }
+}
+
+/// A fresh [ShortsFeed] per Shorts screen.
+final shortsFeedProvider = Provider<ShortsFeed Function()>((ref) => () => ShortsFeed(ref));

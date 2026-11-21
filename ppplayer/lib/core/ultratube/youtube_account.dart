@@ -23,6 +23,26 @@ class YoutubeAccountInfo {
   final String avatar;
 }
 
+/// What the Shorts player shows about a video. [likes] and [comments] are
+/// YouTube's own compact labels ("78 mil", "157"), empty when unknown.
+class ShortInfo {
+  const ShortInfo({this.title = '', this.channel = '', this.channelUrl = '', this.channelAvatar = '', this.likes = '', this.comments = ''});
+  factory ShortInfo.fromJson(Map<String, dynamic> j) => ShortInfo(
+    title: j['title'] as String? ?? '',
+    channel: j['channel'] as String? ?? '',
+    channelUrl: j['channelUrl'] as String? ?? '',
+    channelAvatar: j['channelAvatar'] as String? ?? '',
+    likes: j['likes'] as String? ?? '',
+    comments: j['comments'] as String? ?? '',
+  );
+  final String title;
+  final String channel;
+  final String channelUrl;
+  final String channelAvatar;
+  final String likes;
+  final String comments;
+}
+
 /// The optional YouTube account: the regular Google sign-in page in a
 /// WebView, no client ID or API key. Android uses `YoutubeAccount.kt`; iOS the
 /// Dart port ([DartYoutubeAccount]) with a native WKWebView sign-in page.
@@ -47,6 +67,8 @@ class YoutubeAccountApi {
         'info' => account.info().timeout(_timeout),
         'subscriptions' => account.subscriptions().timeout(_timeout),
         'home' => account.home(args?['token'] as String?).timeout(_timeout),
+        'shorts' => account.shorts(args?['token'] as String?).timeout(_timeout),
+        'shortInfo' => account.shortInfo(args?['id'] as String? ?? '').timeout(_timeout),
         _ => throw UnsupportedError(method),
       };
     }
@@ -71,9 +93,18 @@ class YoutubeAccountApi {
     for (final e in await _call('subscriptions') as List) Subscription.fromJson(Map<String, dynamic>.from(e as Map)),
   ];
 
-  /// The account's YouTube home recommendations.
+  /// The account's YouTube home recommendations (videos and Shorts).
   Future<YtPage> home([String? token]) async =>
       YtPage.fromJson(Map<String, dynamic>.from(await _call('home', {'token': token}) as Map));
+
+  /// YouTube's own Shorts feed: the account's when signed in, the regional
+  /// one otherwise. Only some items carry a title; see [shortInfo].
+  Future<YtPage> shorts([String? token]) async =>
+      YtPage.fromJson(Map<String, dynamic>.from(await _call('shorts', {'token': token}) as Map));
+
+  /// Title, channel and counters of one Short.
+  Future<ShortInfo> shortInfo(String videoId) async =>
+      ShortInfo.fromJson(Map<String, dynamic>.from(await _call('shortInfo', {'id': videoId}) as Map));
 }
 
 class YoutubeAccountNotifier extends Notifier<YoutubeAccountInfo?> {

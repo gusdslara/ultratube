@@ -114,7 +114,7 @@ class TwitchStreamCard extends StatelessWidget {
                         ),
                       if (stream.tags.isNotEmpty) ...[
                         const SizedBox(height: 6),
-                        Wrap(spacing: 6, runSpacing: 4, children: [for (final t in stream.tags.take(3)) _Tag(t)]),
+                        Wrap(spacing: 6, runSpacing: 4, children: [for (final t in stream.tags.take(3)) TwitchTag(t)]),
                       ],
                     ],
                   ),
@@ -159,8 +159,9 @@ class TwitchStreamRow extends StatelessWidget {
   );
 }
 
-class _Tag extends StatelessWidget {
-  const _Tag(this.text);
+/// Small pill for stream and category tags.
+class TwitchTag extends StatelessWidget {
+  const TwitchTag(this.text, {super.key});
   final String text;
   @override
   Widget build(BuildContext context) => Container(
@@ -238,8 +239,11 @@ class TwitchChannelTile extends StatelessWidget {
 
 /// VOD (past broadcast) row.
 class TwitchVodRow extends StatelessWidget {
-  const TwitchVodRow(this.video, {super.key});
+  const TwitchVodRow(this.video, {super.key, this.showChannel = false});
   final TwitchVideo video;
+
+  /// Lists that mix channels (search, category) name the broadcaster.
+  final bool showChannel;
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: video.processing ? null : () => openTwitchVod(context, video),
@@ -256,6 +260,13 @@ class TwitchVodRow extends StatelessWidget {
               children: [
                 Text(video.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
                 const SizedBox(height: 4),
+                if (showChannel && (video.displayName.isNotEmpty || video.login.isNotEmpty))
+                  Text(
+                    video.displayName.isNotEmpty ? video.displayName : video.login,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: UT.text, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
                 Text(
                   [if (video.game.isNotEmpty) video.game, '${compactCount(video.views)} visualizações', agoLabel(video.publishedAt)].join(' · '),
                   maxLines: 2,

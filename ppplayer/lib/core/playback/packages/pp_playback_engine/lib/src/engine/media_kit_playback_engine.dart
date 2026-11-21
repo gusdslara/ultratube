@@ -325,12 +325,16 @@ class NativePlaybackSession {
   final List<StreamSubscription<dynamic>> subscriptions = [];
   bool _torn = false;
 
+  /// Pending check for a non-fatal mpv error line (see `_softError`).
+  Timer? softErrorTimer;
+
   VideoController? get videoController => adapter.videoController;
 
   /// Cancel subscriptions and dispose the adapter exactly once (idempotent).
   Future<void> tear() async {
     if (_torn) return;
     _torn = true;
+    softErrorTimer?.cancel();
     for (final sub in subscriptions) {
       sub.cancel();
     }
@@ -498,20 +502,23 @@ class MediaKitPlaybackEngine implements PlaybackController {
         print('MediaKitPlaybackEngine: [ERROR] $err');
         if (session != _activeSession || _disposed) return;
         final errStr = err.toLowerCase();
-        // media_kit reports every mpv error-level log line here, including
-        // transient socket errors that ffmpeg recovers from on its own
-        // ("tcp: ffurl_read returned …", then "Will reconnect"). For a live
-        // that is already playing these only mean a short rebuffer; failing
-        // the track would drop the broadcast.
-        final live = _currentStatus.track?.liveStatus == PlaybackLiveStatus.live;
-        final transient = RegExp(r'^(tcp|tls|https?|ffmpeg|hls)\b|ffurl_read|i/o error|timed out|connection reset|end of file').hasMatch(errStr) &&
-            !errStr.contains('403') &&
-            !errStr.contains('404');
-        if (live && session.hasPlaybackProgress && transient) return;
         // A rejected seek (live/non-seekable stream; media_kit also seeks to
         // refresh the picture when the surface is re-created) leaves the
         // media playing. It is never a playback failure.
         if (errStr.contains('cannot seek') || errStr.contains('force-seekable')) return;
+        // media_kit reports every mpv error-level log line here (prefixes
+        // tcp/vd/ad/cplayer/stream), most of which mpv survives on its own:
+        // a dropped socket after the screen was locked ("tcp: ffurl_read
+        // returned …", then ffmpeg reconnects), one address of a dual-stack
+        // host refusing, the hardware decoder failing before the video
+        // surface exists and mpv falling back to software. Only a clear
+        // HTTP/open failure ends the attempt at once; anything else fails it
+        // only if playback then stops making progress.
+        final hard = RegExp(r'\b(403|404|410)\b|forbidden|not found|failed to open|failed to recognize').hasMatch(errStr);
+        if (!hard) {
+          _softError(session, err);
+          return;
+        }
         String errorCode = 'error:playback_failed';
         if (errStr.contains('403') || errStr.contains('forbidden')) {
           errorCode = 'error:forbidden';
@@ -538,6 +545,24 @@ class MediaKitPlaybackEngine implements PlaybackController {
         if (!completed) return;
         if (session != _activeSession || _disposed) return;
         _watchdogTimer?.cancel();
+        // When ffmpeg gives up on a dropped connection mpv reports EOF at the
+        // point the download stopped. A network VOD "ending" well before its
+        // length is a failure the owner can resume, not the end of the track.
+        final track = _currentStatus.track;
+        final length = _currentStatus.duration > Duration.zero
+            ? _currentStatus.duration
+            : (track?.duration ?? Duration.zero);
+        if (track != null &&
+            !track.isLocal &&
+            track.liveStatus != PlaybackLiveStatus.live &&
+            length > Duration.zero &&
+            _currentStatus.position < length - const Duration(seconds: 5)) {
+          print('MediaKitPlaybackEngine: early EOF at ${_currentStatus.position} of $length');
+          _updateStatus(
+            _currentStatus.copyWith(state: PlaybackState.error, error: 'error:connection_lost'),
+          );
+          return;
+        }
         _updateStatus(_currentStatus.copyWith(state: PlaybackState.ended));
       }),
       a.bufferingStream.listen((buffering) {
@@ -547,6 +572,10 @@ class MediaKitPlaybackEngine implements PlaybackController {
         if (_currentStatus.state == PlaybackState.preparing && !buffering) {
           return;
         }
+        // A socket that died silently (screen locked, Wi-Fi handover) shows
+        // up only as endless buffering; give the network time, then fail so
+        // the owner can re-open the stream where it stopped.
+        if (buffering) _softError(session, 'buffering', wait: const Duration(seconds: 25));
         _updateStatus(
           _currentStatus.copyWith(
             state:
@@ -1027,6 +1056,30 @@ class MediaKitPlaybackEngine implements PlaybackController {
   // ---------------------------------------------------------------------------
   // Status update + IFrame position polling
   // ---------------------------------------------------------------------------
+
+  /// A non-fatal mpv error line: fail the attempt only if playback that had
+  /// started stops advancing. Startup stalls stay with the play watchdog, and
+  /// a paused player has nothing to verify.
+  void _softError(
+    NativePlaybackSession session,
+    String err, {
+    Duration wait = const Duration(seconds: 10),
+  }) {
+    if (!session.hasPlaybackProgress || session.softErrorTimer?.isActive == true) {
+      return;
+    }
+    final generation = session.generation;
+    final baseline = _currentStatus.position;
+    session.softErrorTimer = Timer(wait, () {
+      if (_disposed || _activeSession != session) return;
+      if (_intendedState != PlaybackState.playing) return;
+      if (_currentStatus.position > baseline + const Duration(milliseconds: 500)) {
+        return; // mpv recovered (reconnect, software decoding, …)
+      }
+      print('MediaKitPlaybackEngine: stalled after "$err"');
+      _failAttempt(generation, 'error:connection_lost');
+    });
+  }
 
   void _failAttempt(int generation, String error) {
     if (!_valid(generation)) return;

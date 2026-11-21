@@ -230,6 +230,56 @@ void main() {
       await tester.pump();
       expect(engine.currentStatus.state, isNot(PlaybackState.error));
       expect(engine.currentStatus.track?.liveStatus, PlaybackLiveStatus.live);
+      // ffmpeg reconnected: playback keeps advancing past the check.
+      adapters.last._positionCtrl.add(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 11));
+      expect(engine.currentStatus.state, isNot(PlaybackState.error));
+    });
+
+    testWidgets('VOD: a socket error is fatal only if playback then stalls', (
+      tester,
+    ) async {
+      const vod = PlaybackTrack(
+        id: 'abcdefghijk',
+        title: 'Video',
+        networkMediaUri: 'https://example.com/videoplayback',
+        sourceType: PlaybackSourceType.networkStream,
+      );
+      await engine.play(vod);
+      await tester.pump();
+      adapters.last._positionCtrl.add(const Duration(seconds: 40));
+      await tester.pump();
+      // Hardware decoder before the surface exists, a dropped socket after
+      // unlock: mpv recovers from both on its own.
+      adapters.last._errorCtrl.add('h264_mediacodec: Both surface and native_window are NULL');
+      adapters.last._errorCtrl.add('tcp: ffurl_read returned 0xffffff92');
+      await tester.pump(const Duration(seconds: 5));
+      expect(engine.currentStatus.state, isNot(PlaybackState.error));
+      adapters.last._positionCtrl.add(const Duration(seconds: 44));
+      await tester.pump(const Duration(seconds: 6));
+      expect(engine.currentStatus.state, isNot(PlaybackState.error));
+      // This time the connection does not come back.
+      adapters.last._errorCtrl.add('tcp: ffurl_read returned 0xffffff92');
+      await tester.pump(const Duration(seconds: 11));
+      expect(engine.currentStatus.state, PlaybackState.error);
+      expect(engine.currentStatus.error, 'error:connection_lost');
+    });
+
+    testWidgets('VOD: a 403 still fails at once', (tester) async {
+      const vod = PlaybackTrack(
+        id: 'abcdefghijk',
+        title: 'Video',
+        networkMediaUri: 'https://example.com/videoplayback',
+        sourceType: PlaybackSourceType.networkStream,
+      );
+      await engine.play(vod);
+      await tester.pump();
+      adapters.last._positionCtrl.add(const Duration(seconds: 3));
+      await tester.pump();
+      adapters.last._errorCtrl.add('HTTP error 403 Forbidden');
+      await tester.pump();
+      expect(engine.currentStatus.state, PlaybackState.error);
+      expect(engine.currentStatus.error, 'error:forbidden');
     });
 
     testWidgets('backward seek during startup still confirms playback', (

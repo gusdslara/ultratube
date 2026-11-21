@@ -14,7 +14,9 @@ import '../playback/playback_providers.dart';
 import '../playback/pip_handler.dart';
 import '../api/spotify_repository.dart';
 import '../api/ultratube_catalog.dart';
-import '../playback/ultratube_playback_controller.dart' show UltratubeResolveCache;
+import '../playback/ultratube_playback_controller.dart'
+    show UltratubeResolveCache, isTransientResolveError;
+import 'package:flutter/services.dart' show PlatformException;
 import '../ultratube/ultratube_store.dart';
 import '../services/settings_provider.dart';
 import '../network_streams/network_stream_service.dart';
@@ -289,6 +291,17 @@ class PlayerNotifier extends Notifier<PlayerState> {
         return;
       }
 
+      // Ultratube already re-extracted and retried this stream; the network
+      // is really down. Skipping ahead would only fail the next items too:
+      // stop here and let the viewer retry.
+      if (status.error == 'error:connection_lost') {
+        state = state.copyWith(
+          loadError: status.error,
+          isLoadingVideo: false,
+          isPlaying: false,
+        );
+        return;
+      }
       if (status.error!.startsWith('unavailable_media:') ||
           status.error!.startsWith('error:')) {
         _handleCandidateFailure();
@@ -862,7 +875,24 @@ class PlayerNotifier extends Notifier<PlayerState> {
       debugPrint('Failed to resolve track ${targetTrack.name}: $e');
       await _controller.stop();
       if (_disposed || myGen != _playbackGeneration) return;
-      final errorMessage = e.toString().contains('Exception:')
+      // Extraction was already retried below this layer. A network failure
+      // would fail every next item as well, so show it with a retry instead
+      // of skipping through the queue; only content that can never play
+      // ("unavailable": private, removed, age/region) moves on.
+      final catalogFailure = e is PlatformException || e is TimeoutException;
+      if (targetTrack.sourceType == TrackSourceType.online &&
+          catalogFailure &&
+          isTransientResolveError(e)) {
+        state = state.copyWith(
+          loadError: 'error:connection_lost',
+          isLoadingVideo: false,
+          isPlaying: false,
+        );
+        return;
+      }
+      final errorMessage = e is PlatformException
+          ? 'unavailable: ${e.message ?? e.code}'
+          : e.toString().contains('Exception:')
           ? e.toString().split('Exception: ').last
           : 'Failed to resolve track playback URL';
       _handleLogicalTrackFailure(errorMessage);

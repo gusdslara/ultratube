@@ -121,20 +121,27 @@ object YoutubeAccount {
             .put("userAgent", DESKTOP_UA))
     }
 
-    private fun call(ctx: Context, endpoint: String, body: JSONObject): JSONObject {
+    /**
+     * [anonymous]: the call also works signed out (Shorts feed); the session
+     * is still sent when there is one, which personalises the answer.
+     */
+    private fun call(ctx: Context, endpoint: String, body: JSONObject, anonymous: Boolean = false, session: Boolean = true): JSONObject {
         val map = synchronized(lock) { cookies(ctx) }
-        if (!hasSession(map)) throw IllegalStateException("Entre com sua conta do YouTube")
+        val signedIn = session && hasSession(map)
+        if (!signedIn && !anonymous) throw IllegalStateException("Entre com sua conta do YouTube")
         body.put("context", context())
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url("$ORIGIN/youtubei/v1/$endpoint?prettyPrint=false")
             .header("User-Agent", DESKTOP_UA)
-            .header("Cookie", map.entries.joinToString("; ") { "${it.key}=${it.value}" })
-            .header("Authorization", authorization(map))
             .header("Origin", ORIGIN).header("X-Origin", ORIGIN).header("Referer", "$ORIGIN/")
-            .header("X-Goog-AuthUser", "0")
             .header("X-Youtube-Client-Name", "1").header("X-Youtube-Client-Version", CLIENT_VERSION)
             .post(body.toString().toRequestBody(json))
-            .build()
+        if (signedIn) {
+            builder.header("Cookie", map.entries.joinToString("; ") { "${it.key}=${it.value}" })
+                .header("Authorization", authorization(map))
+                .header("X-Goog-AuthUser", "0")
+        }
+        val request = builder.build()
         http.newCall(request).execute().use { response ->
             // Google rotates some session cookies; keep the fresh values.
             val fresh = response.headers("Set-Cookie").mapNotNull { line ->
@@ -146,7 +153,7 @@ object YoutubeAccount {
                 val current = cookies(ctx)
                 if (hasSession(current)) save(ctx, current.apply { fresh.forEach { (k, v) -> put(k, v) } })
             }
-            if (response.code == 401 || response.code == 403) throw IllegalStateException("Sessão do YouTube expirou; entre de novo")
+            if (signedIn && (response.code == 401 || response.code == 403)) throw IllegalStateException("Sessão do YouTube expirou; entre de novo")
             if (!response.isSuccessful) throw IllegalStateException("YouTube respondeu ${response.code}")
             return JSONObject(response.body?.string() ?: "{}")
         }
@@ -191,7 +198,147 @@ object YoutubeAccount {
     fun home(ctx: Context, token: String?): JSONObject {
         val body = if (token.isNullOrEmpty()) JSONObject().put("browseId", "FEwhat_to_watch") else JSONObject().put("continuation", token)
         val page = call(ctx, "browse", body)
-        return JSONObject().put("items", JSONArray(videos(page))).put("next", continuation(page) ?: JSONObject.NULL)
+        return JSONObject().put("items", JSONArray(videos(page) + shortsLockups(page))).put("next", continuation(page) ?: JSONObject.NULL)
+    }
+
+    // ---------------------------------------------------------------- Shorts
+
+    /**
+     * A call that works signed out. An expired session must not take the
+     * Shorts tab down with it: the same call is repeated without the account.
+     */
+    private fun open(ctx: Context, endpoint: String, body: JSONObject): JSONObject = try {
+        call(ctx, endpoint, body, anonymous = true)
+    } catch (e: IllegalStateException) {
+        if (!isSignedIn(ctx)) throw e
+        call(ctx, endpoint, body, anonymous = true, session = false)
+    }
+
+    /**
+     * YouTube's own Shorts feed, the one the Shorts tab of youtube.com plays:
+     * personalised when signed in, the regional feed otherwise.
+     * `{items, next}`; [token] continues a previous page.
+     *
+     * Only the first entry of a page carries title and channel; the others
+     * come with id and frame only and are completed by [shortInfo].
+     */
+    fun shorts(ctx: Context, token: String?): JSONObject {
+        var first: JSONObject? = null
+        var sequence = token
+        if (sequence.isNullOrEmpty()) {
+            first = open(ctx, "reel/reel_item_watch", JSONObject().put("disablePlayerResponse", true)
+                .put("inputType", "REEL_WATCH_INPUT_TYPE_SEEDLESS").put("params", "CA8%3D"))
+            sequence = first.optString("sequenceContinuation").ifEmpty { null } ?: return shortsPage(first, null)
+        }
+        return shortsPage(first, open(ctx, "reel/reel_watch_sequence", JSONObject().put("sequenceParams", sequence)))
+    }
+
+    /**
+     * Maps the replies to `{items, next}`: [first] is the seed Short (first
+     * page only), [sequence] the Shorts that follow. Internal for tests.
+     */
+    internal fun shortsPage(first: JSONObject?, sequence: JSONObject?): JSONObject {
+        val items = LinkedHashMap<String, JSONObject>()
+        first?.optJSONObject("replacementEndpoint")?.optJSONObject("reelWatchEndpoint")?.optString("videoId")
+            ?.takeIf { it.length == 11 }?.let { items[it] = shortItem(it, overlayInfo(first)) }
+        val entries = sequence?.optJSONArray("entries")
+        for (i in 0 until (entries?.length() ?: 0)) {
+            val reel = entries!!.optJSONObject(i)?.optJSONObject("command")?.optJSONObject("reelWatchEndpoint") ?: continue
+            val id = reel.optString("videoId")
+            if (id.length != 11 || id in items) continue
+            val info = JSONObject()
+            reel.optJSONObject("unserializedPrefetchData")?.optJSONObject("playerResponse")?.optJSONObject("videoDetails")?.let { d ->
+                info.put("title", d.optString("title")).put("channel", d.optString("author"))
+                    .put("channelId", d.optString("channelId")).put("duration", d.optString("lengthSeconds").toIntOrNull() ?: 0)
+            }
+            items[id] = shortItem(id, info)
+        }
+        val next = sequence?.optJSONObject("continuationEndpoint")?.optJSONObject("continuationCommand")?.optString("token")?.ifEmpty { null }
+        return JSONObject().put("items", JSONArray(items.values.toList())).put("next", next ?: JSONObject.NULL)
+    }
+
+    /** Title, channel and counters of one Short: `{title, channel, channelUrl, channelAvatar, likes, comments}`. */
+    fun shortInfo(ctx: Context, videoId: String): JSONObject {
+        require(Regex("^[a-zA-Z0-9_-]{11}$").matches(videoId)) { "ID de vídeo inválido" }
+        return shortInfo(open(ctx, "reel/reel_item_watch", JSONObject().put("disablePlayerResponse", true)
+            .put("playerRequest", JSONObject().put("videoId", videoId))))
+    }
+
+    /** Internal for tests. */
+    internal fun shortInfo(page: JSONObject): JSONObject {
+        val info = overlayInfo(page)
+        val channelId = info.optString("channelId")
+        return JSONObject().put("title", info.optString("title")).put("channel", info.optString("channel"))
+            .put("channelUrl", if (channelId.isEmpty()) "" else "$ORIGIN/channel/$channelId")
+            .put("channelAvatar", info.optString("avatar"))
+            .put("likes", info.optString("likes")).put("comments", info.optString("comments"))
+    }
+
+    /** What the Shorts player overlay says about its video. */
+    private fun overlayInfo(page: JSONObject): JSONObject {
+        val out = JSONObject()
+        val overlay = find(page.optJSONObject("overlay"), "reelPlayerOverlayViewModel") ?: return out
+        find(overlay, "shortsVideoTitleViewModel")?.let { out.put("title", text(it.optJSONObject("text"))) }
+        find(overlay, "reelChannelBarViewModel")?.let { bar ->
+            out.put("channel", text(bar.optJSONObject("channelName")).removePrefix("@"))
+            out.put("channelId", channelId(bar))
+            find(bar, "avatarViewModel")?.let { out.put("avatar", thumb(it.optJSONObject("image"))) }
+        }
+        val buttons = find(overlay, "reelActionBarViewModel")?.optJSONArray("buttonViewModels")
+        for (i in 0 until (buttons?.length() ?: 0)) {
+            val button = buttons!!.optJSONObject(i) ?: continue
+            if (button.has("likeButtonViewModel")) {
+                find(button, "defaultButtonViewModel")?.let { d -> find(d, "buttonViewModel")?.let { out.put("likes", it.optString("title")) } }
+            } else if (i == 1) {
+                // The comments button: its label is the count ("157").
+                button.optJSONObject("buttonViewModel")?.optString("title")?.takeIf { it.any(Char::isDigit) }?.let { out.put("comments", it) }
+            }
+        }
+        return out
+    }
+
+    private fun shortItem(id: String, info: JSONObject): JSONObject {
+        val channelId = info.optString("channelId")
+        val channel = info.optString("channel")
+        // "oar2" is the vertical frame YouTube uses for Shorts covers.
+        val cover = "https://i.ytimg.com/vi/$id/oar2.jpg"
+        return JSONObject().put("type", "video").put("url", "$ORIGIN/shorts/$id").put("title", info.optString("title"))
+            .put("artist", channel).put("channel", channel)
+            .put("channelUrl", if (channelId.isEmpty()) "" else "$ORIGIN/channel/$channelId")
+            .put("channelAvatar", info.optString("avatar")).put("cover", cover).put("coverHd", cover)
+            .put("duration", info.optInt("duration", 0)).put("views", info.optLong("views", -1)).put("uploaded", "").put("uploadedAt", 0)
+            .put("shorts", true).put("verified", false).put("live", false)
+    }
+
+    /** Shorts shown on shelves of a browse page (home, subscriptions). */
+    internal fun shortsLockups(page: JSONObject): List<JSONObject> {
+        val out = LinkedHashMap<String, JSONObject>()
+        walk(page) { key, node ->
+            if (key != "shortsLockupViewModel") return@walk key == "adSlotRenderer"
+            val id = find(node, "reelWatchEndpoint")?.optString("videoId").orEmpty()
+            if (id.length == 11 && id !in out) {
+                val meta = node.optJSONObject("overlayMetadata")
+                val info = JSONObject().put("title", text(meta?.optJSONObject("primaryText")))
+                    .put("views", count(text(meta?.optJSONObject("secondaryText"))))
+                out[id] = shortItem(id, info).also { item ->
+                    thumb(node.optJSONObject("thumbnail")).takeIf { it.isNotEmpty() }?.let { item.put("cover", it).put("coverHd", it) }
+                }
+            }
+            true
+        }
+        return out.values.toList()
+    }
+
+    /** "1,2 mi de visualizações" / "45 mil views" / "1.2M views" → number, -1 when unreadable. */
+    internal fun count(label: String): Long {
+        val m = Regex("""(\d+(?:[.,]\d+)?)\s*(mil|mi|bi|k|m|b)?""", RegexOption.IGNORE_CASE).find(label.replace('\u00a0', ' ')) ?: return -1
+        val unit = m.groupValues[2].lowercase()
+        val raw = m.groupValues[1]
+        // With a unit the separator is decimal ("1,2 mi"); without, thousands ("1.234").
+        val number = if (unit.isEmpty()) raw.replace(".", "").replace(",", "").toDoubleOrNull()
+            else raw.replace(',', '.').toDoubleOrNull()
+        val scale = when (unit) { "mil", "k" -> 1e3; "mi", "m" -> 1e6; "bi", "b" -> 1e9; else -> 1.0 }
+        return number?.times(scale)?.toLong() ?: -1
     }
 
     // -------------------------------------------------------------- parsing
@@ -313,7 +460,7 @@ object YoutubeAccount {
                     }
                     true
                 }
-                // Shorts shelves and ads are skipped; Shorts have their own tab.
+                // Shorts shelves are read by shortsLockups(); ads are skipped.
                 "reelShelfRenderer", "richShelfRenderer", "adSlotRenderer" ->
                     node.toString().contains("reelWatchEndpoint") || key == "adSlotRenderer"
                 else -> false
@@ -403,6 +550,7 @@ class YoutubeLoginActivity : Activity() {
             addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)))
             addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         })
+        registerBack()
         if (savedInstanceState == null) web.loadUrl(YoutubeAccount.LOGIN_URL) else web.restoreState(savedInstanceState)
     }
 
@@ -414,6 +562,15 @@ class YoutubeLoginActivity : Activity() {
     @Deprecated("Activity back handling")
     override fun onBackPressed() {
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
+    }
+
+    /** Android 13+ (mandatory on 16) delivers back through this dispatcher. */
+    private fun registerBack() {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) {
+                if (web.canGoBack()) web.goBack() else finish()
+            }
+        }
     }
 
     private fun finishWith(ok: Boolean) {
