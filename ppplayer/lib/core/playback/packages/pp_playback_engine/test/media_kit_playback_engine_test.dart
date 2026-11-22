@@ -86,6 +86,7 @@ class FakeNativeAdapter implements INativePlayerAdapter {
     bool play = false,
     Map<String, String>? httpHeaders,
     String? audioUri,
+    bool video = true,
   }) async {
     opens++;
     if (openCompleter != null) await openCompleter!.future;

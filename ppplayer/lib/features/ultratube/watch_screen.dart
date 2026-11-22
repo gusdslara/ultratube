@@ -20,8 +20,10 @@ import '../downloads/track_actions_button.dart';
 import '../live/live_chat_view.dart';
 import '../player/player_providers.dart';
 import 'ask_sheet.dart';
+import 'pip_button.dart';
 import 'playlist_picker.dart';
 import 'queue_sheet.dart';
+import 'comments_sheet.dart' show plainComment;
 import 'yt_widgets.dart';
 
 /// YouTube-style watch page. The video itself is the app-wide playback
@@ -144,8 +146,11 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
     final player = ref.read(playerProvider.notifier);
     final current = ref.read(playerProvider).currentTrack?.youtubeVideoId;
     if (startPlayback && current != id) {
-      // Also turns video on (setPlayerView keeps showVideo in sync).
-      await ref.read(settingsProvider.notifier).setPlayerView(PlayerView.video);
+      // Picture on, unless the viewer chose "Só áudio" (that choice sticks
+      // across videos; setPlayerView keeps showVideo in sync).
+      await ref.read(settingsProvider.notifier).setPlayerView(
+        ref.read(audioOnlyProvider) ? PlayerView.artwork : PlayerView.video,
+      );
       final track = (item ?? YtItem(kind: YtKind.video, url: 'https://www.youtube.com/watch?v=$id', title: '')).toTrack();
       unawaited(player.playTrack(track, queue: [track]));
     }
@@ -423,7 +428,8 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
 
   void _description(BuildContext context, YtVideo video) {
     final colors = Theme.of(context).colorScheme;
-    final text = video.description.replaceAll(RegExp(r'<br\s*/?>'), '\n').replaceAll(RegExp(r'<[^>]+>'), '').replaceAll('&amp;', '&').replaceAll('&quot;', '"').replaceAll('&#39;', "'");
+    // Same clean-up as comments (the iOS catalog may still send HTML).
+    final text = plainComment(video.description);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -480,7 +486,7 @@ class _Actions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final audioOnly = !ref.watch(settingsProvider.select((s) => s.showVideo));
+    final audioOnly = ref.watch(audioOnlyProvider);
     Widget pill(IconData icon, String label, VoidCallback? onTap, {bool active = false}) {
       return Padding(
         padding: const EdgeInsets.only(right: 8),
@@ -530,7 +536,20 @@ class _Actions extends ConsumerWidget {
           pill(
             audioOnly ? Icons.headphones : Icons.headphones_outlined,
             'Só áudio',
-            () => ref.read(settingsProvider.notifier).toggleVideo(),
+            () {
+              HapticFeedback.selectionClick();
+              final next = !audioOnly;
+              ref.read(audioOnlyProvider.notifier).set(next);
+              // Re-resolves the current video at the same position: audio
+              // only streams just the audio track (a fraction of the data).
+              ref.read(settingsProvider.notifier).setPlayerView(next ? PlayerView.artwork : PlayerView.video);
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(SnackBar(
+                  content: Text(next ? 'Só áudio: a imagem não é baixada' : 'Vídeo ligado'),
+                  duration: const Duration(seconds: 2),
+                ));
+            },
             active: audioOnly,
           ),
           pill(Icons.share_outlined, 'Compartilhar', () {
@@ -905,6 +924,7 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
     final quality = ref.watch(videoQualityProvider);
     final autoplay = ref.watch(ultratubeAutoplayProvider);
     final chatPrefs = ref.watch(liveChatPrefsProvider);
+    final audioOnly = !ref.watch(settingsProvider.select((s) => s.showVideo));
     final live = widget.live;
     // Lives have no fixed duration, so "started" can't wait for one.
     final started = state.currentTrack?.youtubeVideoId == widget.item?.videoId &&
@@ -928,6 +948,30 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
         children: [
           if (!started && widget.item != null && widget.item!.bestCover.isNotEmpty)
             Opacity(opacity: 0.6, child: NetImage(widget.item!.bestCover)),
+          // Audio only: the cover stands in for the picture.
+          if (started && audioOnly) ...[
+            if (widget.item != null && widget.item!.bestCover.isNotEmpty) NetImage(widget.item!.bestCover),
+            const Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: EdgeInsets.all(10),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(12))),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.headphones, size: 14, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Só áudio', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           if (loading && state.loadError == null) const Center(child: CircularProgressIndicator(color: Colors.white)),
           if (state.loadError != null)
             Center(
@@ -1033,14 +1077,20 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
                     Positioned(
                       top: 4,
                       right: 4,
-                      child: PopupMenuButton<int>(
-                        tooltip: 'Qualidade',
-                        icon: const Icon(Icons.settings_outlined, color: Colors.white),
-                        initialValue: quality,
-                        onSelected: ref.read(videoQualityProvider.notifier).set,
-                        itemBuilder: (_) => [
-                          for (final h in VideoQualityNotifier.options.reversed)
-                            CheckedPopupMenuItem(value: h, checked: h == quality, child: Text(h >= 2160 ? '${h}p 4K' : '${h}p')),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const PipButton(),
+                          PopupMenuButton<int>(
+                            tooltip: 'Qualidade',
+                            icon: const Icon(Icons.settings_outlined, color: Colors.white),
+                            initialValue: quality,
+                            onSelected: ref.read(videoQualityProvider.notifier).set,
+                            itemBuilder: (_) => [
+                              for (final h in VideoQualityNotifier.options.reversed)
+                                CheckedPopupMenuItem(value: h, checked: h == quality, child: Text(h >= 2160 ? '${h}p 4K' : '${h}p')),
+                            ],
+                          ),
                         ],
                       ),
                     ),

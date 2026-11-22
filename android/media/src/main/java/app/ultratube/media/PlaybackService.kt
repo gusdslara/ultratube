@@ -86,8 +86,8 @@ class PlaybackService : MediaSessionService() {
             val id = spec.uri.host ?: ""
             val url = try {
                 when (spec.uri.path) {
-                    "/video" -> Streams.video(id).first
-                    "/audio" -> Streams.video(id).second
+                    "/video" -> Streams.video(id, spec.uri.getQueryParameter("s") == "1").first
+                    "/audio" -> Streams.video(id, spec.uri.getQueryParameter("s") == "1").second
                     // Lives: one HLS rendition (<= 360p) and its audio group.
                     "/livevideo" -> Streams.live(id).first
                     "/liveaudio" -> Streams.live(id).second
@@ -112,9 +112,19 @@ class PlaybackService : MediaSessionService() {
                 addListener(object : Player.Listener {
                     private var failures = 0
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        val id = currentMediaItem?.mediaId
+                        // A Short whose quick app-client URL is refused (YouTube answers
+                        // some with 403): try the same Short again through the full
+                        // extraction before giving up on it.
+                        val refused = generateSequence(error.cause) { it.cause }
+                            .any { it is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && it.responseCode == 403 }
+                        if (id != null && refused && Streams.retrySlow(id)) {
+                            handler.post { prepare(); play() }
+                            return
+                        }
                         // A stale URL or a blocked video must not end the whole queue:
                         // skip it (deferred, outside the error dispatch), up to 15 in a row.
-                        currentMediaItem?.mediaId?.let(Streams::forget)
+                        id?.let(Streams::forget)
                         if (++failures > 15) return
                         handler.post {
                             if (hasNextMediaItem()) { seekToNextMediaItem(); prepare(); play() }
@@ -216,9 +226,11 @@ private class UltratubeSourceFactory(context: Context, dataSource: DataSource.Fa
         }
         if (uri?.scheme != PlaybackService.SCHEME || uri.getQueryParameter("v") != "1") return default.createMediaSource(mediaItem)
         val id = uri.host ?: ""
+        // Shorts keep their flag (quick app-client resolve) on both parts.
+        val short = if (uri.getQueryParameter("s") == "1") "?s=1" else ""
         // Keep the original item (id + metadata) on both parts; only the URI differs.
-        val video = progressive.createMediaSource(mediaItem.buildUpon().setUri("${PlaybackService.SCHEME}://$id/video").build())
-        val audio = progressive.createMediaSource(mediaItem.buildUpon().setUri("${PlaybackService.SCHEME}://$id/audio").build())
+        val video = progressive.createMediaSource(mediaItem.buildUpon().setUri("${PlaybackService.SCHEME}://$id/video$short").build())
+        val audio = progressive.createMediaSource(mediaItem.buildUpon().setUri("${PlaybackService.SCHEME}://$id/audio$short").build())
         return MergingMediaSource(true, true, video, audio)
     }
 
@@ -252,11 +264,17 @@ internal object Streams {
     }
 
     /** (video URL, audio URL); for muxed streams both point to the same file. */
+    /**
+     * [short]: one request to the app client (a third of the time of the
+     * full extraction) before NewPipe. The watch speaker/earbuds don't need
+     * more than the data-saver audio next to a 360p picture.
+     */
     @Synchronized
-    fun video(videoId: String): Pair<String, String> {
+    fun video(videoId: String, short: Boolean = false): Pair<String, String> {
         check(videoId)
         video[videoId]?.takeIf { System.currentTimeMillis() - it.second < TTL }?.let { return it.first }
-        val r = Catalog.resolve("https://www.youtube.com/watch?v=$videoId", true, WATCH_MAX_HEIGHT)
+        val r = Catalog.resolve("https://www.youtube.com/watch?v=$videoId", true, WATCH_MAX_HEIGHT,
+            fast = short && videoId !in slow, audioQuality = AudioQuality.LOW)
         val stream = r.getString("stream")
         val pair = stream to (r.optString("audio").ifBlank { stream })
         video[videoId] = pair to System.currentTimeMillis()
@@ -275,6 +293,16 @@ internal object Streams {
         val pair = stream to (r.optString("audio").ifBlank { stream })
         live[videoId] = pair to System.currentTimeMillis()
         return pair
+    }
+
+    /** Shorts whose quick URL was refused: they resolve the full way from now on. */
+    private val slow = ConcurrentHashMap.newKeySet<String>()
+
+    /** True (once per id) when a refused quick URL should be retried the full way. */
+    fun retrySlow(mediaId: String): Boolean {
+        if (!video.containsKey(mediaId) || !slow.add(mediaId)) return false
+        forget(mediaId)
+        return true
     }
 
     fun forget(mediaId: String) {
@@ -296,7 +324,12 @@ object Playback {
         if (item.optString("type") == "twitch") return twitch(item, video)
         val id = videoId(item.getString("url"))
         val live = if (item.optBoolean("live")) "/live" else ""
-        val uri = Uri.parse("${PlaybackService.SCHEME}://$id$live" + if (video) "?v=1" else "")
+        val short = item.optBoolean("shorts") || item.optString("url").contains("/shorts/")
+        val uri = Uri.parse("${PlaybackService.SCHEME}://$id$live" + when {
+            !video -> ""
+            short && live.isEmpty() -> "?v=1&s=1"
+            else -> "?v=1"
+        })
         val cover = item.optString("coverHd").ifBlank { item.optString("cover") }
         return item(id, uri, item.optString("title"), item.optString("artist"), cover, video)
     }

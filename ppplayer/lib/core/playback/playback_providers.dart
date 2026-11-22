@@ -149,13 +149,15 @@ final localPlaybackControllerProvider = Provider<PlaybackController>((ref) {
   if (isUltratubePlatform) {
     final native = UltratubePlaybackController(
       MediaKitPlaybackEngine(),
-      resolve: (id, {required video}) => const UltratubeCatalog().resolve(
-        id,
-        video: video,
-        maxHeight: ref.read(videoQualityProvider),
-      ),
+      resolve: (id, {required video, required maxHeight, required audio}) =>
+          const UltratubeCatalog().resolve(
+            id,
+            video: video,
+            maxHeight: maxHeight,
+            audio: audio,
+          ),
       video: () => ref.read(settingsProvider).showVideo,
-      maxHeight: () => ref.read(videoQualityProvider),
+      profile: () => readStreamProfile(ref.read),
       segments: const SponsorBlock().segments,
       skipEnabled: () => ref.read(sponsorSkipProvider),
       onSkip: (segment) =>
@@ -173,6 +175,13 @@ final localPlaybackControllerProvider = Provider<PlaybackController>((ref) {
     });
     ref.listen(videoQualityProvider, (previous, next) {
       if (previous != next && ref.read(settingsProvider).showVideo) refresh();
+    });
+    // A new audio track tier applies to what is playing right away.
+    ref.listen(audioQualityProvider, (previous, next) {
+      if (previous != next) refresh();
+    });
+    ref.listen(mobileDataSaverProvider, (previous, next) {
+      if (previous != next && NetworkKind.cellular) refresh();
     });
   } else {
     final mediaKit = MediaKitPlaybackEngine();

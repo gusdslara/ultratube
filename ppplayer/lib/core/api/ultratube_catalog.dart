@@ -43,6 +43,7 @@ class UltratubeCatalog {
     String videoId, {
     required bool video,
     int maxHeight = 1080,
+    String audio = 'normal',
   }) async {
     if (!RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(videoId)) {
       throw ArgumentError('ID de vídeo inválido');
@@ -53,6 +54,7 @@ class UltratubeCatalog {
             'video': video,
             'maxHeight': maxHeight,
             'fast': fastIds.contains(videoId),
+            'audio': audio,
           })
           as Map,
     );
@@ -79,6 +81,13 @@ class UltratubeCatalog {
   ];
 
   Future<YtPage> kiosk(String id) => _page('kiosk', {'id': id});
+
+  /// LRCLIB lyrics (`syncedLyrics`/`plainLyrics`/`instrumental`), with the
+  /// same title clean-up on the phone, the watch and iOS.
+  Future<Map<String, dynamic>> lyrics(String title, String artist) async =>
+      Map<String, dynamic>.from(
+        await _call('lyrics', {'title': title, 'artist': artist}) as Map,
+      );
 
   /// Newest uploads of [channels] (channel URLs), merged newest first.
   Future<YtPage> feed(List<String> channels) =>

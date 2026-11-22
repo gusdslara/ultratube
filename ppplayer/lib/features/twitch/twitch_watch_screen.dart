@@ -19,6 +19,7 @@ import '../../core/twitch/twitch_store.dart';
 import '../../core/ultratube/ultratube_platform.dart';
 import '../live/live_chat_view.dart';
 import '../player/player_providers.dart';
+import '../ultratube/pip_button.dart';
 import '../ultratube/yt_widgets.dart' show Avatar, NetImage, durationLabel;
 import 'twitch_widgets.dart';
 
@@ -643,6 +644,7 @@ class _TwitchVideoSlotState extends ConsumerState<_TwitchVideoSlot> {
                             icon: const Icon(Icons.tune_rounded),
                             onPressed: () => showLiveChatSettings(context),
                           ),
+                        const PipButton(),
                         IconButton(
                           tooltip: 'Qualidade',
                           color: Colors.white,

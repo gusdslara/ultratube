@@ -80,6 +80,12 @@ class YoutubeAccountApi {
       ? await _channel.invokeMethod<bool>('signIn') ?? false
       : DartYoutubeAccount.instance.signIn();
 
+  /// The Ultratube watch app cannot show Google's page (Wear OS has no
+  /// WebView): this phone hands it its session ("Conectar relógio").
+  static bool get watchLinkSupported => _native;
+
+  Future<void> linkWatch() => _channel.invokeMethod<bool>('linkWatch');
+
   Future<void> signOut() =>
       _native ? _channel.invokeMethod<String>('signOut') : DartYoutubeAccount.instance.signOut();
 

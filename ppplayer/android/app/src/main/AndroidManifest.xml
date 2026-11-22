@@ -17,7 +17,7 @@
 
     <application
         android:label="Ultratube"
-        android:name="${applicationName}"
+        android:name=".UltratubeApplication"
         android:localeConfig="@xml/locales_config"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round">
@@ -39,6 +39,22 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- "Conectar relógio": the QR on the Ultratube watch app leads here
+             (ultratube://link?h=<ip:port>&k=<code>) to send the YouTube session. -->
+        <activity
+            android:name=".WatchLinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="ultratube" android:host="link"/>
             </intent-filter>
         </activity>
 

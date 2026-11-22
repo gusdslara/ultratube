@@ -53,7 +53,7 @@ void main() {
     final controller = UltratubePlaybackController(
       engine,
       video: () => videoMode,
-      resolve: (_, {required video}) async {
+      resolve: (_, {required video, required maxHeight, required audio}) async {
         if (video) throw StateError('No video stream');
         return {'stream': 'https://example.com/audio'};
       },
@@ -71,7 +71,7 @@ void main() {
     final controller = UltratubePlaybackController(
       engine,
       video: () => false,
-      resolve: (id, {required video}) => (pending[id] = Completer()).future,
+      resolve: (id, {required video, required maxHeight, required audio}) => (pending[id] = Completer()).future,
     );
     final a = controller.play(first);
     await Future<void>.delayed(Duration.zero);
@@ -93,7 +93,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => false,
-        resolve: (_, {required video}) => pending.future,
+        resolve: (_, {required video, required maxHeight, required audio}) => pending.future,
       );
       final playing = controller.play(first);
       await Future<void>.delayed(Duration.zero);
@@ -109,7 +109,7 @@ void main() {
     final controller = UltratubePlaybackController(
       engine,
       video: () => false,
-      resolve: (_, {required video}) => pending.future,
+      resolve: (_, {required video, required maxHeight, required audio}) => pending.future,
     );
     final playing = controller.play(first);
     await Future<void>.delayed(Duration.zero);
@@ -127,7 +127,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => videoMode,
-        resolve: (_, {required video}) async {
+        resolve: (_, {required video, required maxHeight, required audio}) async {
           modes.add(video);
           return {'stream': 'https://example.com/media'};
         },
@@ -154,7 +154,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => false,
-        resolve: (_, {required video}) async {
+        resolve: (_, {required video, required maxHeight, required audio}) async {
           resolves++;
           return {'stream': 'https://example.com/audio$resolves'};
         },
@@ -187,7 +187,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => false,
-        resolve: (_, {required video}) async {
+        resolve: (_, {required video, required maxHeight, required audio}) async {
           if (++calls == 1) {
             throw PlatformException(code: 'ultratube_error', message: 'timeout');
           }
@@ -205,7 +205,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => false,
-        resolve: (_, {required video}) async {
+        resolve: (_, {required video, required maxHeight, required audio}) async {
           calls++;
           throw PlatformException(code: 'unavailable', message: 'Private video');
         },
@@ -221,7 +221,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => false,
-        resolve: (_, {required video}) async {
+        resolve: (_, {required video, required maxHeight, required audio}) async {
           if (++calls > 1) {
             throw PlatformException(code: 'unavailable', message: 'Removed');
           }

@@ -36,6 +36,8 @@ import app.ultratube.media.Downloads
 import app.ultratube.media.Playback
 import app.ultratube.media.PlaybackService
 import app.ultratube.media.Twitch
+import app.ultratube.media.WatchLink
+import app.ultratube.media.YoutubeAccount
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -46,7 +48,7 @@ import java.util.concurrent.Executors
  * rotary-scrollable column, sized for round 1.2–1.5" displays.
  */
 class MainActivity : Activity() {
-    private enum class Screen { HOME, SEARCH, RESULTS, DOWNLOADS, QUEUE, LYRICS, TWITCH }
+    private enum class Screen { HOME, SEARCH, RESULTS, DOWNLOADS, QUEUE, LYRICS, TWITCH, ACCOUNT, LINK }
 
     private val io = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
@@ -76,6 +78,7 @@ class MainActivity : Activity() {
         override fun onEvents(player: Player, events: Player.Events) {
             refreshNowPlaying()
             if (screen == Screen.QUEUE && events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) showQueue()
+            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) WatchShorts.moreIfNeeded(this@MainActivity, player)
         }
     }
 
@@ -107,6 +110,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- screens
 
     private fun reset(next: Screen, horizontal: Int = 30) {
+        if (next != Screen.LINK) stopLink()
         screen = next
         generation++
         titleView = null; artistView = null; coverView = null; progressView = null; playButton = null; timerView = null; shownCover = null
@@ -152,6 +156,8 @@ class MainActivity : Activity() {
         pill("Buscar por voz", R.drawable.ic_mic) { voiceSearch() }
         pill("Digitar busca", R.drawable.ic_keyboard) { showSearch() }
         pill("Shorts", R.drawable.ic_shorts) { startShorts() }
+        if (YoutubeAccount.isSignedIn(this)) pill("Para você", R.drawable.ic_video) { forYou() }
+        pill(if (YoutubeAccount.isSignedIn(this)) "Conta" else "Entrar com o celular", R.drawable.ic_account) { showAccount() }
         pill("Twitch ao vivo", R.drawable.ic_twitch) { showTwitch() }
         pill("Lives do YouTube", R.drawable.ic_live) { youtubeLives() }
         pill("Downloads", R.drawable.ic_download) { showDownloads() }
@@ -232,7 +238,8 @@ class MainActivity : Activity() {
         resultsTitle = title
         reset(Screen.RESULTS, 22)
         header(title)
-        if (title != "Favoritos") kindChips(title, if (video) "videos" else "music")
+        // Músicas · Vídeos · Shorts only switch a search, not the account lists.
+        if (title !in setOf("Favoritos", "Para você", "Inscrições", "Lives")) kindChips(title, if (video) "videos" else "music")
         if (items.length() == 0) { empty(if (title == "Favoritos") "Sem favoritos.\nSegure um resultado para salvar." else "Nenhum resultado.\nTente outro tipo acima."); return }
         hint(if (video) "Vídeos · toque para assistir" else "Toque para tocar · segure para mais")
         val queue = (0 until items.length()).map { Playback.online(items.getJSONObject(it), video) }
@@ -297,7 +304,9 @@ class MainActivity : Activity() {
         reset(Screen.LYRICS)
         header("Letra")
         val body = label("Carregando…", 15, Color.WHITE)
-        work({ Catalog.lyrics(cleanTitle(title), c?.mediaMetadata?.artist?.toString().orEmpty()) }, onError = { body.text = it }) {
+        // Read on the main thread: MediaController refuses calls from the worker.
+        val artist = c?.mediaMetadata?.artist?.toString().orEmpty()
+        work({ Catalog.lyrics(title, artist) }, onError = { body.text = it }) {
             body.text = it.optString("plainLyrics").ifBlank { "Letra indisponível" }
         }
     }
@@ -390,24 +399,144 @@ class MainActivity : Activity() {
         }) { showResults(query, it, video = !music) }
     }
 
-    /** Vertical Shorts player seeded by [topic] (or what's popular). */
+    // ---------------------------------------------------------------- Shorts
+
+    /**
+     * Vertical Shorts player. Without a [topic] it plays YouTube's own Shorts
+     * feed (the account's when signed in, the regional one otherwise) and
+     * keeps adding pages as you swipe; a topic searches Shorts instead.
+     */
     private fun startShorts(topic: String = "") {
-        // Broad "#shorts" brings many region/age-restricted clips; popular topics play reliably.
-        val query = topic.ifBlank { listOf("shorts brasil", "shorts engraçados", "shorts futebol", "shorts música", "mrbeast shorts").random() }
         reset(Screen.RESULTS); header(if (topic.isBlank()) "Shorts" else topic)
         if (topic.isNotBlank()) kindChips(topic, "shorts")
         val loading = label("Carregando Shorts…", 13, MUTED)
-        work({ Catalog.search(query, true, shorts = true) }, onError = { error ->
+        work({
+            if (topic.isNotBlank()) return@work JSONObject().put("items", Catalog.search(topic, true, shorts = true)).put("next", JSONObject.NULL)
+            // The real feed; a topic search only if YouTube's feed fails.
+            runCatching { WatchShorts.page(this, null) }.getOrNull()?.takeIf { it.getJSONArray("items").length() > 0 }
+                ?: JSONObject().put("items", Catalog.search(listOf("shorts brasil", "shorts engraçados", "shorts futebol", "shorts música").random(), true, shorts = true))
+                    .put("next", JSONObject.NULL)
+        }, onError = { error ->
             loading.text = "Não foi possível carregar Shorts.\n($error)"
             pill("Tentar de novo", R.drawable.ic_shorts, primary = true) { startShorts(topic) }
-        }) { items ->
+        }) { page ->
+            val items = page.getJSONArray("items")
             if (items.length() == 0) { loading.text = "Nenhum Short encontrado"; return@work }
             val c = controller ?: return@work toast("Player indisponível")
-            Playback.playAll(c, (0 until items.length()).map { Playback.online(items.getJSONObject(it), video = true) }, 0)
+            WatchShorts.play(c, page)
+            // A topic search is a fixed list: no paging or refresh of the feed.
+            WatchShorts.active = topic.isBlank()
             showHome()
             PlayerActivity.open(this, shorts = true)
         }
     }
+
+    // --------------------------------------------------------------- account
+
+    /** The account's own YouTube home ("Para você"). */
+    private fun forYou() {
+        reset(Screen.RESULTS); header("Para você")
+        val loading = label("Carregando…", 13, MUTED)
+        work({
+            val page = YoutubeAccount.home(this, null)
+            val items = page.getJSONArray("items")
+            // Regular videos only: Shorts have their own player.
+            JSONArray((0 until items.length()).map { items.getJSONObject(it) }.filter { !it.optBoolean("shorts") })
+        }, onError = { error ->
+            loading.text = "Não foi possível carregar.\n($error)"
+            pill("Tentar de novo", R.drawable.ic_video, primary = true) { forYou() }
+        }) { showResults("Para você", it, video = true) }
+    }
+
+    private fun showAccount() {
+        if (!YoutubeAccount.isSignedIn(this)) return showLink()
+        reset(Screen.ACCOUNT, 22)
+        header("Conta")
+        val avatar = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true; background = rounded(SURFACE, dp(28)) }
+        content.addView(avatar, LinearLayout.LayoutParams(dp(56), dp(56)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        val name = label("Conta do YouTube", 15, Color.WHITE, bold = true, lines = 1)
+        val handle = label("Verificando…", 12, MUTED, lines = 1)
+        work({ YoutubeAccount.info(this) }, onError = { handle.text = "Sem conexão" }) { info ->
+            if (!info.optBoolean("signedIn")) {
+                handle.text = "A sessão expirou. Entre de novo pelo celular."
+                handle.setTextColor(ERROR)
+                return@work
+            }
+            name.text = info.optString("name").ifBlank { "Conta do YouTube" }
+            handle.text = info.optString("handle")
+            // YouTube sends an 88 px photo; ask for a bigger one (covers are
+            // decoded at 1/4 size to save memory).
+            loadCover(info.optString("avatar").replace(Regex("=s\\d+"), "=s400"), avatar)
+        }
+        pill("Para você", R.drawable.ic_video, primary = true) { forYou() }
+        pill("Shorts da conta", R.drawable.ic_shorts) { startShorts() }
+        pill("Inscrições", R.drawable.ic_list) { subscriptionsFeed() }
+        pill("Trocar de conta", R.drawable.ic_account) { showLink() }
+        pill("Sair", R.drawable.ic_logout) {
+            AlertDialog.Builder(this).setMessage("Sair da conta do YouTube no relógio?")
+                .setPositiveButton("Sair") { _, _ -> YoutubeAccount.signOut(this); toast("Conta removida do relógio"); showHome() }
+                .setNegativeButton("Cancelar", null).show()
+        }
+    }
+
+    /** Newest uploads from the channels the account follows. */
+    private fun subscriptionsFeed() {
+        reset(Screen.RESULTS); header("Inscrições")
+        val loading = label("Carregando inscrições…", 13, MUTED)
+        work({
+            val channels = YoutubeAccount.subscriptions(this)
+            val urls = (0 until channels.length()).map { channels.getJSONObject(it).optString("url") }.filter { it.isNotBlank() }.take(40)
+            val feed = Catalog.feed(urls).getJSONArray("items")
+            JSONArray((0 until feed.length()).map { feed.getJSONObject(it) }.filter { !it.optBoolean("shorts") }.take(40))
+        }, onError = { error ->
+            loading.text = "Não foi possível carregar.\n($error)"
+            pill("Tentar de novo", R.drawable.ic_list, primary = true) { subscriptionsFeed() }
+        }) { showResults("Inscrições", it, video = true) }
+    }
+
+    private var link: AccountLink? = null
+
+    /**
+     * "Entrar com o celular": Wear OS has no browser to show Google's page,
+     * so the signed-in Ultratube on the phone sends its session here over
+     * the Wi-Fi (scan the QR, or type the address and code in the phone app).
+     */
+    private fun showLink() {
+        reset(Screen.LINK, 26)
+        header("Entrar")
+        val status = label("Ligando o Wi-Fi…", 12, MUTED)
+        val qrImage = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER; background = rounded(Color.WHITE, dp(10)); setPadding(dp(6), dp(6), dp(6), dp(6))
+            contentDescription = "QR para o celular"; visibility = android.view.View.GONE
+        }
+        content.addView(qrImage, LinearLayout.LayoutParams(dp(150), dp(150)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(4) })
+        val addressView = label("", 13, Color.WHITE, bold = true)
+        val codeView = label("", 13, ACCENT, bold = true).apply { letterSpacing = 0.05f }
+        hint("No celular: Ultratube › Você › Conectar relógio, ou escaneie o QR com a câmera. Mesmo Wi-Fi nos dois.")
+        val request = generation
+        link?.stop()
+        link = AccountLink(this, object : AccountLink.Listener {
+            override fun onReady(address: String, code: String, qr: android.graphics.Bitmap) {
+                if (request != generation) return
+                status.text = "Escaneie com a câmera do celular"
+                qrImage.setImageBitmap(qr); qrImage.visibility = android.view.View.VISIBLE
+                addressView.text = address
+                codeView.text = "Código\n${WatchLink.pretty(code)}"
+            }
+            override fun onWaitingForWifi() {
+                if (request != generation) return
+                status.text = "Procurando Wi-Fi… Conecte o relógio a uma rede Wi-Fi (a mesma do celular)."
+            }
+            override fun onLinked(name: String) {
+                stopLink()
+                toast(if (name.isBlank()) "Conta conectada" else "Conectado: $name")
+                if (request == generation) showAccount()
+            }
+            override fun onError(message: String) { if (request == generation) status.text = message }
+        }).also { it.start() }
+    }
+
+    private fun stopLink() { link?.stop(); link = null }
 
     private fun openPlayer() {
         if ((controller?.mediaItemCount ?: 0) == 0) return toast("Busque algo para tocar")
@@ -416,6 +545,7 @@ class MainActivity : Activity() {
 
     private fun play(queue: List<MediaItem>, index: Int) {
         val c = controller ?: return toast("Player indisponível")
+        WatchShorts.active = false
         Playback.playAll(c, queue, index)
         showHome()
         PlayerActivity.open(this)
@@ -617,8 +747,6 @@ class MainActivity : Activity() {
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     private fun duration(seconds: Long) = if (seconds <= 0) null else "%d:%02d".format(seconds / 60, seconds % 60)
-    private fun cleanTitle(title: String) =
-        title.replace(Regex("\\s*[(\\[][^)\\]]*(official|video|lyric|audio|clipe|visualizer)[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE), "").trim()
 
     // ------------------------------------------------------------ lifecycle
 
@@ -657,6 +785,7 @@ class MainActivity : Activity() {
         // way out of the app also ends playback.
         if (isFinishing && !isChangingConfigurations) closeApp()
         generation++
+        stopLink()
         controller?.removeListener(listener)
         connection?.let { MediaController.releaseFuture(it) }
         io.shutdownNow()

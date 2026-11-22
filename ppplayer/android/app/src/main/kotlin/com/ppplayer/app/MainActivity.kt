@@ -56,10 +56,8 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        flutterEngine.plugins.add(UltratubeCatalogPlugin())
-        flutterEngine.plugins.add(WebViewPlugin())
-        flutterEngine.plugins.add(LocalFilesPlugin())
-        flutterEngine.plugins.add(NetworkOutputsPlugin())
+        // Usually already attached by UltratubeApplication (same engine).
+        UltratubePlugins.register(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {

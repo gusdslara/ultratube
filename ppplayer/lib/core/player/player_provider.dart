@@ -142,6 +142,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   // short) track that ends right after still advances.
   String? _lastAdvancedEndedKey;
   bool _lastPipEnabled = false;
+  double? _lastPipAspect;
   Timer? _saveTimer;
   bool _disposed = false;
   Future<void> _persistenceWork = Future.value();
@@ -197,7 +198,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
     });
 
     PipHandler.addPipModeListener((isPipMode) {
-      state = state.copyWith(isPipMode: isPipMode);
+      // Android's answer settles the request either way. Leaving the flag
+      // set after a successful entry kept the whole interface hidden (video
+      // only) once the viewer came back from the floating window.
+      state = state.copyWith(isPipMode: isPipMode, isPipRequestPending: false);
     });
 
     PipHandler.addPipEntryRequestedListener(() {
@@ -369,11 +373,22 @@ class PlayerNotifier extends Notifier<PlayerState> {
     // requires this to be done only when the activity is foregrounded, we just pass it when wantPip changes.
     // If we are currently playing a video and the aspect ratio changes, we might want to update it.
     // Let's just pass the current aspect ratio.
-    if (wantPip != _lastPipEnabled) {
+    // The window takes the shape of the video playing when the app is left:
+    // a new video (a vertical Short after a regular one) updates it too, but
+    // only while the app is in front (Android refuses it otherwise).
+    final pipAspect = status.videoAspectRatio;
+    final aspectChanged = wantPip &&
+        pipAspect != null &&
+        pipAspect > 0 &&
+        (_lastPipAspect == null || (pipAspect - _lastPipAspect!).abs() > 0.01) &&
+        !PipHandler.isInPipMode &&
+        !PipHandler.isActivityStopped;
+    if (wantPip != _lastPipEnabled || aspectChanged) {
       _lastPipEnabled = wantPip;
+      if (pipAspect != null && pipAspect > 0) _lastPipAspect = pipAspect;
       PipHandler.setPipEnabled(
         wantPip,
-        aspectRatio: status.videoAspectRatio ?? (16 / 9),
+        aspectRatio: pipAspect ?? (16 / 9),
       );
     }
 
@@ -411,6 +426,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       );
       _restoringState = false;
       _restoreTimeout?.cancel();
+      _runDeferredResume();
     }
 
     // Trigger prefetch once playback starts successfully
@@ -430,10 +446,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final ytId = nextTrack.youtubeVideoId;
       if (ytId != null && nextTrack.spotifyId.contains(':')) {
         // Resolve the next stream ahead of time so "up next" starts instantly.
+        final profile = readStreamProfile(ref.read);
         UltratubeResolveCache.warm(
           ytId,
           video: ref.read(settingsProvider).showVideo,
-          maxHeight: ref.read(videoQualityProvider),
+          maxHeight: profile.maxHeight,
+          audio: profile.audio,
         );
         return;
       }
@@ -627,7 +645,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   Future<void> _prepareRestoredTrack(Duration savedPosition) async {
     final track = state.currentTrack;
     if (track == null) {
-      _restoringState = false;
+      _clearRestoreGuard();
       return;
     }
 
@@ -646,7 +664,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         }
 
         if (candidates.isEmpty) {
-          _restoringState = false;
+          _clearRestoreGuard();
           return;
         }
 
@@ -700,6 +718,16 @@ class PlayerNotifier extends Notifier<PlayerState> {
     }
     _restoreTimeout?.cancel();
     _restoreTimeout = null;
+    _runDeferredResume();
+  }
+
+  /// A play request that came in during the startup restore.
+  bool _resumeAfterRestore = false;
+
+  void _runDeferredResume() {
+    if (!_resumeAfterRestore || _restoringState || _disposed) return;
+    _resumeAfterRestore = false;
+    unawaited(resume());
   }
 
   PlaybackController get _controller => ref.read(playbackControllerProvider);
@@ -1031,7 +1059,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
     // the startup restore is cuing the video. _restoringState is cleared by
     // _prepareRestoredTrack once the IFrame is ready (or on failure).
     if (_restoringState) {
-      debugPrint('PlayerNotifier: resume() blocked — restore in progress');
+      // Not dropped: an explicit play (watch, headset, notification) that
+      // arrives while the saved queue is being restored — typically right
+      // after the system started the app for it — runs once the restore
+      // settles. Before, it was lost and nothing played.
+      debugPrint('PlayerNotifier: resume() deferred — restore in progress');
+      _resumeAfterRestore = true;
       return;
     }
     final engineState = _controller.currentStatus.state;

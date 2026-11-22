@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api/ultratube_catalog.dart';
 import '../../core/downloads/ultratube_downloads.dart';
+import '../../core/playback/media_handler.dart' show RemoteSkipOverride;
 import '../../core/playback/playback_providers.dart';
 import '../../core/playback/ultratube_playback_controller.dart' show UltratubeResolveCache;
 import '../../core/player/player_provider.dart';
@@ -17,6 +18,7 @@ import '../../core/ultratube/feeds.dart';
 import '../../core/ultratube/ultratube_store.dart';
 import '../../core/ultratube/youtube_account.dart';
 import '../ultratube/comments_sheet.dart';
+import '../ultratube/pip_button.dart';
 import '../ultratube/yt_widgets.dart';
 
 /// Endless vertical Shorts player. Opens on [seed] when a Short was tapped,
@@ -32,13 +34,17 @@ class ShortsScreen extends ConsumerStatefulWidget {
 const _connectionLost = 'error:connection_lost';
 
 class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBindingObserver {
-  final _pages = PageController();
+  var _pages = PageController();
   final _slot = GlobalKey();
   final List<YtItem> _items = [];
   final Set<String> _seen = {};
   int _index = 0;
   int _emptyLoads = 0;
-  late final ShortsFeed _feed;
+  late ShortsFeed _feed;
+
+  /// Bumped by [_refresh]: pages that arrive from the old feed are dropped.
+  int _feedGeneration = 0;
+  bool _refreshing = false;
 
   /// Title, channel and counters fetched per Short (YouTube's feed only
   /// names the first item of a page).
@@ -65,10 +71,74 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
       WidgetsBinding.instance.addPostFrameCallback((_) => _play(0));
     }
     _loadMore(autoplay: _items.isEmpty);
+    // Next/previous from the notification, a headset or a paired watch
+    // swipe the feed (the player itself only holds the current Short).
+    RemoteSkipOverride.next = _remoteNext;
+    RemoteSkipOverride.previous = _remotePrevious;
+  }
+
+  bool _remoteNext() {
+    if (!mounted) return false;
+    if (_index + 1 < _items.length) {
+      _pages.nextPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
+    } else {
+      _advanceWhenLoaded = true;
+      _loadMore();
+    }
+    return true;
+  }
+
+  bool _remotePrevious() {
+    if (!mounted) return false;
+    if (_index > 0) {
+      _pages.previousPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
+    } else {
+      // "Previous" on the first Short (watch, headset, notification) does
+      // what pulling down at the top does: a fresh feed.
+      unawaited(_refresh());
+    }
+    return true;
+  }
+
+  /// A fresh feed from YouTube, like pulling down at the top of the Shorts
+  /// tab: new recommendations instead of the rest of the current sequence.
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    _refreshing = true;
+    HapticFeedback.mediumImpact();
+    _feedGeneration++;
+    _stall?.cancel();
+    unawaited(_playback.pause());
+    // A new controller: the old one would bring the new list back at the
+    // page the old one had reached.
+    final old = _pages;
+    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    setState(() {
+      _pages = PageController();
+      _feed = ref.read(shortsFeedProvider)();
+      // _seen is kept: YouTube starts every new sequence with the same
+      // Short, and a refresh should only bring ones not shown yet.
+      _items.clear();
+      _info.clear();
+      _infoRequests.clear();
+      _infoRequested.clear();
+      _index = 0;
+      _emptyLoads = 0;
+      _advanceWhenLoaded = false;
+      _loading = false;
+      _error = null;
+    });
+    try {
+      await _loadMore(autoplay: true);
+    } finally {
+      _refreshing = false;
+    }
   }
 
   @override
   void dispose() {
+    if (RemoteSkipOverride.next == _remoteNext) RemoteSkipOverride.next = null;
+    if (RemoteSkipOverride.previous == _remotePrevious) RemoteSkipOverride.previous = null;
     WidgetsBinding.instance.removeObserver(this);
     _stall?.cancel();
     _pages.dispose();
@@ -100,13 +170,13 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
   /// resolved, cover in the image cache, title and counters loaded. Swiping
   /// then only has to open the stream.
   void _prepare(int from) {
-    final settings = ref.read(settingsProvider);
-    final maxHeight = ref.read(videoQualityProvider);
+    // Shorts always play with picture (see _play), whatever "Só áudio" says.
+    final profile = readStreamProfile(ref.read);
     for (var i = from; i <= from + 2 && i < _items.length; i++) {
       final item = _items[i];
       final id = item.videoId!;
       if (i != from) {
-        UltratubeResolveCache.warm(id, video: settings.showVideo, maxHeight: maxHeight);
+        UltratubeResolveCache.warm(id, video: true, maxHeight: profile.maxHeight, audio: profile.audio);
         if (item.cover.startsWith('http')) {
           unawaited(precacheImage(NetworkImage(item.cover), context, onError: (_, _) {}));
         }
@@ -115,9 +185,13 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
     }
   }
 
-  Future<void> _loadInfo(YtItem item) async {
+  /// The Short's info, fetched once (callers may await the same request).
+  final Map<String, Future<void>> _infoRequests = {};
+  Future<void> _loadInfo(YtItem item) => _infoRequests[item.videoId!] ??= _fetchInfo(item);
+
+  Future<void> _fetchInfo(YtItem item) async {
     final id = item.videoId!;
-    if (!_infoRequested.add(id)) return;
+    _infoRequested.add(id);
     try {
       final info = await YoutubeAccountNotifier.api.shortInfo(id);
       if (!mounted) return;
@@ -153,8 +227,9 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
       _error = null;
     });
     try {
+      final generation = _feedGeneration;
       final found = await _feed.next();
-      if (!mounted) return;
+      if (!mounted || generation != _feedGeneration) return;
       final before = _items.length;
       setState(() => _add(found));
       if (autoplay && before == 0 && _items.isNotEmpty) {
@@ -203,7 +278,17 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
     await ref.read(settingsProvider.notifier).setPlayerView(PlayerView.video);
     if (!mounted) return;
     _measure();
-    final item = _items[index];
+    var item = _items[index];
+    // The feed names only the first Short of a page. Wait briefly for the
+    // title (~0.3 s) so the notification and a paired watch show it instead
+    // of "Shorts"; _prepare has usually fetched it already.
+    if (item.title.isEmpty) {
+      try {
+        await _loadInfo(item).timeout(const Duration(milliseconds: 800));
+      } catch (_) {}
+      if (!mounted || _index != index) return;
+      item = _items.firstWhere((i) => i.videoId == item.videoId, orElse: () => item);
+    }
     // Watchdog: a Short that never starts is skipped. Extraction and stream
     // errors are retried below this screen first, so allow for that; a
     // connection failure shows a retry instead (see the loadError listener).
@@ -262,7 +347,18 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
-    final player = ref.watch(playerProvider);
+    // Only what changes the page: the playback position ticks many times a
+    // second and must not rebuild (and re-measure) the whole feed.
+    final player = ref.watch(
+      playerProvider.select(
+        (s) => (
+          videoId: s.currentTrack?.youtubeVideoId,
+          hasDuration: s.duration > Duration.zero,
+          isPlaying: s.isPlaying,
+          loadError: s.loadError,
+        ),
+      ),
+    );
     // A blocked/unavailable Short skips ahead instead of stalling the feed.
     // A lost connection would fail the next Short too: offer a retry instead.
     ref.listen(playerProvider.select((s) => s.loadError), (prev, next) {
@@ -299,15 +395,23 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
                     : const CircularProgressIndicator(color: Colors.white),
               )
             else
-              PageView.builder(
+              // Pull down on the first Short: a fresh feed (YouTube's gesture).
+              RefreshIndicator(
+                onRefresh: _refresh,
+                color: Colors.white,
+                backgroundColor: Colors.black87,
+                edgeOffset: MediaQuery.paddingOf(context).top + 48,
+                child: PageView.builder(
                 controller: _pages,
                 scrollDirection: Axis.vertical,
+                // Bounce at the top so the pull reaches the refresh indicator.
+                physics: const AlwaysScrollableScrollPhysics(),
                 itemCount: _items.length,
                 onPageChanged: (i) => unawaited(_play(i)),
                 itemBuilder: (context, i) {
                   final item = _items[i];
                   final current = i == _index;
-                  final started = current && player.currentTrack?.youtubeVideoId == item.videoId && player.duration > Duration.zero;
+                  final started = current && player.videoId == item.videoId && player.hasDuration;
                   return Stack(
                     fit: StackFit.expand,
                     children: [
@@ -336,6 +440,7 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
                   );
                 },
               ),
+              ),
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(4),
@@ -349,6 +454,13 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
                     ),
                     const Text('Shorts', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
                     const Spacer(),
+                    const PipButton(),
+                    IconButton(
+                      color: Colors.white,
+                      tooltip: 'Atualizar Shorts',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _refreshing ? null : _refresh,
+                    ),
                     IconButton(
                       color: Colors.white,
                       tooltip: 'Buscar Shorts',
@@ -359,21 +471,30 @@ class _ShortsScreenState extends ConsumerState<ShortsScreen> with WidgetsBinding
                 ),
               ),
             ),
-            if (_items.isNotEmpty && player.position > Duration.zero && player.duration > Duration.zero)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: LinearProgressIndicator(
-                  minHeight: 2,
-                  value: (player.position.inMilliseconds / player.duration.inMilliseconds).clamp(0.0, 1.0),
-                  color: Colors.white,
-                  backgroundColor: Colors.white24,
-                ),
-              ),
+            if (_items.isNotEmpty) const Positioned(left: 0, right: 0, bottom: 0, child: _Progress()),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Thin progress line; the only part of the screen that follows the
+/// playback position.
+class _Progress extends ConsumerWidget {
+  const _Progress();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final value = ref.watch(
+      playerProvider.select((s) {
+        if (s.position <= Duration.zero || s.duration <= Duration.zero) return -1.0;
+        // Steps of 1/200: finer than the eye sees on a 2 px line.
+        return ((s.position.inMilliseconds / s.duration.inMilliseconds).clamp(0.0, 1.0) * 200).roundToDouble() / 200;
+      }),
+    );
+    if (value < 0) return const SizedBox.shrink();
+    return RepaintBoundary(
+      child: LinearProgressIndicator(minHeight: 2, value: value, color: Colors.white, backgroundColor: Colors.white24),
     );
   }
 }
@@ -416,15 +537,25 @@ class _Overlay extends ConsumerWidget {
       left: 0,
       right: 0,
       bottom: 0,
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.transparent, Colors.black54],
+      // The shade under the text is decoration only: a DecoratedBox takes
+      // every touch inside it, which made the lower half of the Short
+      // ignore tap-to-pause. Only the buttons and the channel take touches.
+      child: Stack(
+        children: [
+          const Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black54],
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-        child: SafeArea(
+          SafeArea(
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 40, 8, 24),
@@ -502,6 +633,7 @@ class _Overlay extends ConsumerWidget {
             ),
           ),
         ),
+        ],
       ),
     );
   }

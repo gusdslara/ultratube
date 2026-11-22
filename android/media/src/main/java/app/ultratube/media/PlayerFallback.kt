@@ -42,8 +42,8 @@ object PlayerFallback {
         .readTimeout(15, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS).build()
 
     /** Playable answer from the first client that gets one, or null. */
-    fun resolve(videoId: String, video: Boolean, maxHeight: Int): JSONObject? =
-        playable(videoId)?.let { (client, response) -> streams(response, video, maxHeight)?.put("client", client.name) }
+    fun resolve(videoId: String, video: Boolean, maxHeight: Int, audioQuality: String = AudioQuality.NORMAL): JSONObject? =
+        playable(videoId)?.let { (client, response) -> streams(response, video, maxHeight, audioQuality)?.put("client", client.name) }
 
     /** Watch-page details ([Catalog.video] shape) from a playable answer. */
     fun details(videoId: String): JSONObject? = playable(videoId)?.second?.let(::metadata)
@@ -84,7 +84,8 @@ object PlayerFallback {
         }
     }
 
-    private data class Format(val url: String, val mime: String, val width: Int, val height: Int, val bitrate: Long, val fps: Int) {
+    private data class Format(val url: String, val mime: String, val width: Int, val height: Int, val bitrate: Long, val fps: Int,
+                              val drc: Boolean = false, val original: Boolean = true) {
         val isVideo get() = mime.startsWith("video/")
         val isMp4 get() = mime.startsWith("video/mp4") || mime.startsWith("audio/mp4")
         /** Quality as YouTube labels it: the short side (1080 for 1920x1080 and 1080x1920). */
@@ -94,11 +95,14 @@ object PlayerFallback {
     private fun formats(array: JSONArray?): List<Format> = (0 until (array?.length() ?: 0)).mapNotNull { i ->
         val f = array!!.getJSONObject(i)
         val url = f.optString("url").takeIf { it.startsWith("https://") } ?: return@mapNotNull null // ciphered
-        Format(url, f.optString("mimeType"), f.optInt("width"), f.optInt("height"), f.optLong("bitrate"), f.optInt("fps"))
+        // Multi-language videos list every dubbed track; the default one is the original.
+        val original = f.optJSONObject("audioTrack")?.optBoolean("audioIsDefault", true) ?: true
+        Format(url, f.optString("mimeType"), f.optInt("width"), f.optInt("height"), f.optLong("bitrate"), f.optInt("fps"),
+            drc = f.optBoolean("isDrc"), original = original)
     }
 
     /** Maps a playable player response to the resolve JSON; internal for tests. */
-    internal fun streams(response: JSONObject, video: Boolean, maxHeight: Int): JSONObject? {
+    internal fun streams(response: JSONObject, video: Boolean, maxHeight: Int, audioQuality: String = AudioQuality.NORMAL): JSONObject? {
         val data = response.optJSONObject("streamingData") ?: return null
         val result = metadata(response)
         val hls = data.optString("hlsManifestUrl").takeIf { it.startsWith("https://") }
@@ -107,8 +111,11 @@ object PlayerFallback {
             return result.put("hls", hls).put("stream", hls).put("height", 0)
         }
         val adaptive = formats(data.optJSONArray("adaptiveFormats"))
-        val audios = adaptive.filter { it.mime.startsWith("audio/") }
-        val audio = audios.filter { it.isMp4 }.maxByOrNull { it.bitrate } ?: audios.maxByOrNull { it.bitrate }
+        val audios = adaptive.filter { it.mime.startsWith("audio/") }.let { all ->
+            // Plain, original-language tracks first (no dubs, no "stable volume" DRC copies).
+            all.filter { it.original && !it.drc }.ifEmpty { all }
+        }
+        val audio = AudioQuality.pick(audios, audioQuality, { it.bitrate }, { it.isMp4 })
         if (!video) {
             val stream = audio?.url ?: hls ?: return null
             return result.put("stream", stream)

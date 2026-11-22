@@ -1,32 +1,16 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
+import '../../core/api/ultratube_catalog.dart';
 import '../../core/player/player_provider.dart';
 import '../../core/playback/playback_providers.dart';
 import 'ultratube_lrc.dart';
 
+/// Shared lookup: native `Catalog.lyrics` on Android (the watch uses the
+/// same code), `DartCatalog.lyrics` on iOS.
 final _lyrics = FutureProvider.autoDispose
-    .family<Map<String, dynamic>, (String, String)>((ref, key) async {
-      final client = http.Client();
-      ref.onDispose(client.close);
-      final response = await client
-          .get(
-            Uri.https('lrclib.net', '/api/get', {
-              'track_name': key.$1,
-              'artist_name': key.$2,
-            }),
-            headers: {'User-Agent': 'Ultratube/0.1.0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 404)
-        return {'plainLyrics': 'Letra não encontrada para esta faixa.'};
-      if (response.statusCode != 200)
-        throw StateError(
-          'Serviço de letras indisponível (${response.statusCode})',
-        );
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    });
+    .family<Map<String, dynamic>, (String, String)>(
+      (ref, key) => const UltratubeCatalog().lyrics(key.$1, key.$2),
+    );
 
 void showUltratubeLyrics(BuildContext context) => showModalBottomSheet<void>(
   context: context,

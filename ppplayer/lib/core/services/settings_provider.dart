@@ -188,7 +188,13 @@ class SettingsNotifier extends Notifier<SettingsState> {
     final autoplayEnabled =
         box.get(_autoplayEnabledKey, defaultValue: true) as bool;
     final continuePlaybackInPip =
-        box.get(_continuePlaybackInPipKey, defaultValue: false) as bool;
+        // Ultratube on Android: a playing video continues in a floating
+        // window when leaving the app, like the YouTube app.
+        box.get(
+              _continuePlaybackInPipKey,
+              defaultValue: !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
+            )
+            as bool;
     final languageCode = box.get(_languageCodeKey) as String?;
     final videoFitModeIndex =
         box.get(_videoFitModeKey, defaultValue: VideoFitMode.fit.index) as int;

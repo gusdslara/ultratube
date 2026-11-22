@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import app.ultratube.media.AudioQuality
 import app.ultratube.media.Catalog
 import app.ultratube.media.Downloads
 import app.ultratube.media.YoutubeAccount
@@ -49,7 +50,7 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
                         "video" -> Catalog.video(str("url")).toString()
                         "comments" -> Catalog.comments(str("url")).toString()
                         "resolve" -> Catalog.resolve(str("url"), call.argument<Boolean>("video") ?: false, call.argument<Int>("maxHeight") ?: 1080,
-                            call.argument<Boolean>("fast") ?: false).toString()
+                            call.argument<Boolean>("fast") ?: false, AudioQuality.parse(call.argument<String>("audio"))).toString()
                         "related" -> Catalog.related(str("url")).toString()
                         "lyrics" -> Catalog.lyrics(str("title"), str("artist")).toString()
                         else -> throw UnsupportedOperationException(call.method)
@@ -78,6 +79,11 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
         account = MethodChannel(binding.binaryMessenger, "app.ultratube/account").also { channel ->
             channel.setMethodCallHandler { call, reply ->
                 val ctx = context ?: return@setMethodCallHandler reply.error("detached", null, null)
+                if (call.method == "linkWatch") {
+                    val host = activity ?: return@setMethodCallHandler reply.error("no_activity", "Abra o app", null)
+                    host.startActivity(Intent(host, WatchLinkActivity::class.java))
+                    return@setMethodCallHandler reply.success(true)
+                }
                 if (call.method == "signIn") {
                     val host = activity ?: return@setMethodCallHandler reply.error("no_activity", "Abra o app para entrar", null)
                     YoutubeLoginActivity.onResult?.invoke(false) // a previous, abandoned attempt

@@ -7,7 +7,12 @@ import '../api/sponsorblock.dart';
 import '../api/ultratube_catalog.dart';
 
 typedef ResolveUltratubeMedia =
-    Future<Map<String, dynamic>> Function(String id, {required bool video});
+    Future<Map<String, dynamic>> Function(
+      String id, {
+      required bool video,
+      required int maxHeight,
+      required String audio,
+    });
 typedef LoadSkipSegments = Future<List<SkipSegment>> Function(String id);
 
 /// Short-lived cache of resolved stream URLs so the next queue item can be
@@ -16,16 +21,17 @@ class UltratubeResolveCache {
   static const _ttl = Duration(minutes: 45);
   static final _entries = <String, (DateTime, Future<Map<String, dynamic>>)>{};
 
-  static String _key(String id, bool video, int maxHeight) =>
-      '$id|${video ? maxHeight : 0}';
+  static String _key(String id, bool video, int maxHeight, String audio) =>
+      '$id|${video ? maxHeight : 0}|$audio';
 
   static Future<Map<String, dynamic>> get(
     String id, {
     required bool video,
     required int maxHeight,
+    required String audio,
     required Future<Map<String, dynamic>> Function() resolve,
   }) {
-    final key = _key(id, video, maxHeight);
+    final key = _key(id, video, maxHeight, audio);
     final hit = _entries[key];
     if (hit != null && DateTime.now().difference(hit.$1) < _ttl) return hit.$2;
     final future = resolve();
@@ -40,16 +46,23 @@ class UltratubeResolveCache {
   }
 
   /// Starts resolving [id] in the background.
-  static void warm(String id, {required bool video, required int maxHeight}) {
+  static void warm(
+    String id, {
+    required bool video,
+    required int maxHeight,
+    String audio = 'normal',
+  }) {
     unawaited(
       get(
         id,
         video: video,
         maxHeight: maxHeight,
+        audio: audio,
         resolve: () => const UltratubeCatalog().resolve(
           id,
           video: video,
           maxHeight: maxHeight,
+          audio: audio,
         ),
       ).then((_) {}, onError: (Object _) {}),
     );
@@ -83,7 +96,7 @@ class UltratubePlaybackController implements PlaybackController {
     this.segments,
     this.skipEnabled,
     this.onSkip,
-    this.maxHeight,
+    this.profile,
   }) {
     _engineSubscription = _engine.statusStream.listen(_onEngineStatus);
   }
@@ -96,8 +109,13 @@ class UltratubePlaybackController implements PlaybackController {
   Duration _lastPosition = Duration.zero;
   Duration? _recoveredAt;
 
-  /// When set, resolutions go through [UltratubeResolveCache] (prefetch).
-  final int Function()? maxHeight;
+  /// Video height cap and audio quality to stream right now (they follow
+  /// the settings and the mobile data saver). When set, resolutions also go
+  /// through [UltratubeResolveCache] (prefetch).
+  final ({int maxHeight, String audio}) Function()? profile;
+
+  ({int maxHeight, String audio}) _profile() =>
+      profile?.call() ?? (maxHeight: 1080, audio: 'normal');
   final PlaybackController _engine;
   final ResolveUltratubeMedia resolve;
   final bool Function() video;
@@ -164,6 +182,10 @@ class UltratubePlaybackController implements PlaybackController {
     // A failed stream URL must be re-extracted on retry, never reused.
     if (s.state == PlaybackState.error && s.track != null) {
       UltratubeResolveCache.forget(s.track!.id);
+      // The quick app-client URL was refused (YouTube answers some with
+      // 403): the retry must go through the full extraction instead of
+      // asking the same client again.
+      UltratubeCatalog.fastIds.remove(s.track!.id);
     }
     if (_isCurrentOnline(s)) {
       if (s.position > Duration.zero) _lastPosition = s.position;
@@ -244,7 +266,13 @@ class UltratubePlaybackController implements PlaybackController {
     var attempt = 0;
     while (true) {
       try {
-        return await resolve(id, video: wantsVideo);
+        final p = _profile();
+        return await resolve(
+          id,
+          video: wantsVideo,
+          maxHeight: p.maxHeight,
+          audio: p.audio,
+        );
       } catch (error) {
         if (++attempt >= 3 ||
             !isTransientResolveError(error) ||
@@ -287,13 +315,14 @@ class UltratubePlaybackController implements PlaybackController {
     if (track.sourceType == PlaybackSourceType.online) {
       unawaited(_loadSegments(track.id, generation));
       final wantsVideo = video();
-      final height = maxHeight;
-      final media = height == null
+      final p = _profile();
+      final media = profile == null
           ? await _resolveWithRetry(track.id, wantsVideo, generation)
           : await UltratubeResolveCache.get(
               track.id,
               video: wantsVideo,
-              maxHeight: height(),
+              maxHeight: p.maxHeight,
+              audio: p.audio,
               resolve: () => _resolveWithRetry(track.id, wantsVideo, generation),
             );
       if (_disposed || generation != _generation) return;

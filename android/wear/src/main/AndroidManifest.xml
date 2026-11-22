@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-feature android:name="android.hardware.type.watch" />
+    <!-- "Entrar com o celular": keep the watch's Wi-Fi up and listen on it. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <application android:label="Ultratube" android:icon="@drawable/ic_ultratube" android:theme="@style/Ultratube" android:allowBackup="false" android:usesCleartextTraffic="false">
         <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">

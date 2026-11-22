@@ -34,6 +34,7 @@ import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import org.schabi.newpipe.extractor.stream.AudioTrackType
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.stream.VideoStream
 import android.util.Log
@@ -207,10 +208,26 @@ object Catalog {
     fun kiosks(): JSONArray = JSONArray(service.kioskList.availableKiosks.toList())
 
     fun kiosk(id: String): JSONObject {
-        val url = service.kioskList.getListLinkHandlerFactoryByType(id).fromId(id).url
-        val info = KioskInfo.getInfo(service, url)
-        return page(info.relatedItems.mapNotNull(::item), info.nextPage?.let { KioskCursor(url, it) })
+        val chart = runCatching {
+            val url = service.kioskList.getListLinkHandlerFactoryByType(id).fromId(id).url
+            val info = KioskInfo.getInfo(service, url)
+            page(info.relatedItems.mapNotNull(::item), info.nextPage?.let { KioskCursor(url, it) })
+        }
+        chart.getOrNull()?.takeIf { it.getJSONArray("items").length() > 0 }?.let { return it }
+        // YouTube keeps retiring its chart pages (the music one stopped
+        // answering NewPipe in 11/2026): a search stands in for it.
+        val fallback = KIOSK_FALLBACK[id.lowercase()] ?: throw chart.exceptionOrNull() ?: IllegalStateException("Nada em $id")
+        Log.i(TAG, "kiosk $id unavailable (${chart.exceptionOrNull()?.message}); using search")
+        return search(fallback.first, fallback.second)
     }
+
+    /** Kiosk id → (query, search kind) used when the chart itself fails. */
+    private val KIOSK_FALLBACK = mapOf(
+        "trending_music" to ("músicas em alta" to "music"),
+        "music" to ("músicas em alta" to "music"),
+        "trending_gaming" to ("games em alta" to "videos"),
+        "trending_podcasts_episodes" to ("podcast episódio completo" to "videos"),
+    )
 
     /**
      * Latest uploads of many channels through YouTube's lightweight RSS feeds,
@@ -274,7 +291,7 @@ object Catalog {
             .put("subscribers", info.uploaderSubscriberCount).put("verified", info.isUploaderVerified)
             .put("views", info.viewCount).put("likes", info.likeCount)
             .put("uploaded", info.textualUploadDate ?: "").put("uploadedAt", info.uploadDate?.instant?.toEpochMilli() ?: 0L)
-            .put("description", info.description?.content() ?: "").put("descriptionHtml", info.description?.type()?.name == "HTML")
+            .put("description", plainText(info.description)).put("descriptionHtml", false)
             .put("cover", best(info.thumbnails, 720)).put("coverHd", hd(best(info.thumbnails, 4000)))
             .put("duration", info.duration)
             .put("live", info.streamType == StreamType.LIVE_STREAM || info.streamType == StreamType.AUDIO_LIVE_STREAM)
@@ -301,14 +318,14 @@ object Catalog {
      * separate video-only track (up to [maxHeight]) plus an `audio` track,
      * which is how YouTube serves anything above 360p.
      */
-    fun resolve(url: String, video: Boolean, maxHeight: Int = 1080, fast: Boolean = false): JSONObject {
+    fun resolve(url: String, video: Boolean, maxHeight: Int = 1080, fast: Boolean = false, audioQuality: String = AudioQuality.NORMAL): JSONObject {
         checkUrl(url)
         val started = System.currentTimeMillis()
         // Shorts: one request to the app client's player API answers in a
         // third of the time of a full watch-page extraction, with direct
         // URLs. Anything it cannot play falls through to NewPipe below.
         if (fast) {
-            runCatching { PlayerFallback.resolve(videoId(url), video, maxHeight) }.getOrNull()
+            runCatching { PlayerFallback.resolve(videoId(url), video, maxHeight, audioQuality) }.getOrNull()
                 ?.takeIf { !it.optBoolean("live") && it.optString("stream").startsWith("https://") }
                 ?.let {
                     Log.i(TAG, "resolve ${videoId(url)} fast via ${it.optString("client")} (${System.currentTimeMillis() - started} ms)")
@@ -321,10 +338,10 @@ object Catalog {
             // NewPipe asks YouTube as a client it now refuses for many Shorts
             // and some videos ("UNPLAYABLE: This video is not available").
             // The same video usually plays for the iOS/Android app clients.
-            val fallback = PlayerFallback.resolve(videoId(url), video, maxHeight) ?: throw e
+            val fallback = PlayerFallback.resolve(videoId(url), video, maxHeight, audioQuality) ?: throw e
             Log.i(TAG, "resolve ${videoId(url)} via ${fallback.optString("client")} after \"${e.message}\" (${System.currentTimeMillis() - started} ms)")
             fallback.optString("hls").takeIf { fallback.optBoolean("live") && it.isNotEmpty() }?.let { hls ->
-                runCatching { liveRendition(hls, maxHeight, video) }.getOrNull()?.let { (stream, audio, height) ->
+                runCatching { liveRendition(hls, maxHeight, video, audioQuality) }.getOrNull()?.let { (stream, audio, height) ->
                     fallback.put("stream", stream).put("height", height)
                     if (audio != null) fallback.put("audio", audio) else fallback.remove("audio")
                 }
@@ -344,7 +361,7 @@ object Catalog {
             // and one failed rendition kills playback. Pick one video
             // rendition (≤ maxHeight) plus its audio group instead.
             if (hls != null) {
-                runCatching { liveRendition(hls, maxHeight, video) }.getOrNull()?.let { (stream, audio, height) ->
+                runCatching { liveRendition(hls, maxHeight, video, audioQuality) }.getOrNull()?.let { (stream, audio, height) ->
                     result.put("stream", stream).put("height", height)
                     if (audio != null) result.put("audio", audio)
                     return result
@@ -355,7 +372,10 @@ object Catalog {
             return result.put("stream", manifest).put("height", 0)
         }
         val audio = info.audioStreams.filter { it.isUrl }.let { streams ->
-            streams.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate } ?: streams.maxByOrNull { it.averageBitrate }
+            // The original language, never a dubbed or "descriptive" track
+            // when the original exists (multi-language videos list them all).
+            val original = streams.filter { it.audioTrackType == null || it.audioTrackType == AudioTrackType.ORIGINAL }
+            AudioQuality.pick(original.ifEmpty { streams }, audioQuality, { it.averageBitrate.toLong() }, { it.format == MediaFormat.M4A })
         }
         if (!video) {
             val stream = audio?.content ?: hls
@@ -382,7 +402,7 @@ object Catalog {
      * Reads a live HLS master: returns (media playlist, audio playlist or
      * null when muxed, height). Audio mode returns the best audio group alone.
      */
-    private fun liveRendition(master: String, maxHeight: Int, video: Boolean): Triple<String, String?, Int>? {
+    private fun liveRendition(master: String, maxHeight: Int, video: Boolean, audioQuality: String = AudioQuality.NORMAL): Triple<String, String?, Int>? {
         val text = http.newCall(HttpRequest.Builder().url(master).build()).execute().use {
             if (!it.isSuccessful) return null
             it.body?.string() ?: return null
@@ -415,9 +435,10 @@ object Catalog {
             }
         }
         if (variants.isEmpty()) return null
-        // Highest-bandwidth audio group (YouTube: 233 = low, 234 = high).
-        val bestAudioGroup = variants.filter { it.audio != null && audioGroups.containsKey(it.audio) }
-            .maxByOrNull { it.bandwidth }?.audio
+        // Audio group by bandwidth (YouTube: 233 = low, 234 = high); the
+        // data saver takes the low one.
+        val withAudio = variants.filter { it.audio != null && audioGroups.containsKey(it.audio) }
+        val bestAudioGroup = (if (audioQuality == AudioQuality.LOW) withAudio.minByOrNull { it.bandwidth } else withAudio.maxByOrNull { it.bandwidth })?.audio
         if (!video) {
             val audio = bestAudioGroup?.let { audioGroups[it] }
             if (audio != null) return Triple(audio, null, 0)
@@ -429,15 +450,35 @@ object Catalog {
         return Triple(pick.url, pick.audio?.let { audioGroups[it] }, pick.height)
     }
 
+    /**
+     * Lyrics from LRCLIB for a YouTube title: "(Official Video)"-style tags
+     * and " - Topic" are dropped first; when the exact match misses, the best
+     * search hit is used. Same rules as `DartCatalog.lyrics` (iOS).
+     */
     fun lyrics(title: String, artist: String): JSONObject {
-        val url = "https://lrclib.net/api/get".toHttpUrl().newBuilder()
-            .addQueryParameter("track_name", title).addQueryParameter("artist_name", artist).build()
-        http.newCall(HttpRequest.Builder().url(url).header("User-Agent", "Ultratube/0.2.0").build()).execute().use {
-            if (it.code == 404) return JSONObject().put("plainLyrics", "Letra não encontrada")
-            check(it.isSuccessful) { "Não foi possível carregar a letra (${it.code})" }
-            return JSONObject(it.body!!.string())
+        val track = lyricsTitle(title)
+        val singer = artistName(artist)
+        val exact = "https://lrclib.net/api/get".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", track).addQueryParameter("artist_name", singer).build()
+        http.newCall(HttpRequest.Builder().url(exact).header("User-Agent", LYRICS_AGENT).build()).execute().use {
+            if (it.isSuccessful) return JSONObject(it.body!!.string())
+            check(it.code == 404) { "Não foi possível carregar a letra (${it.code})" }
         }
+        val search = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", track).addQueryParameter("artist_name", singer).build()
+        http.newCall(HttpRequest.Builder().url(search).header("User-Agent", LYRICS_AGENT).build()).execute().use {
+            val hits = if (it.isSuccessful) JSONArray(it.body!!.string()) else JSONArray()
+            if (hits.length() > 0) return hits.getJSONObject(0)
+        }
+        return JSONObject().put("plainLyrics", "Letra não encontrada para esta faixa.")
     }
+
+    private const val LYRICS_AGENT = "Ultratube/1.0"
+
+    /** "Song (Official Music Video) [4K]" → "Song". Internal for tests. */
+    internal fun lyricsTitle(title: String) = title
+        .replace(Regex("\\s*[(\\[][^)\\]]*(official|video|lyric|letra|audio|áudio|clipe|visualizer|4k|hd)[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE), "")
+        .trim()
 
     // ---------------------------------------------------------------- mapping
 
@@ -452,6 +493,12 @@ object Catalog {
     fun artistName(uploader: String?) = uploader.orEmpty().removeSuffix(" - Topic").trim()
 
     private const val TAG = "UltratubeCatalog"
+
+    private fun plainText(description: org.schabi.newpipe.extractor.stream.Description?): String {
+        val content = description?.content() ?: return ""
+        if (description.type()?.name != "HTML") return content
+        return android.text.Html.fromHtml(content, android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim()
+    }
 
     private fun videoId(url: String): String = service.streamLHFactory.getId(url)
 
@@ -496,9 +543,10 @@ object Catalog {
         else -> null
     }
 
+    /** Comments go out as plain text (YouTube sends light HTML with entities like &apos;). */
     private fun comment(item: CommentsInfoItem) = JSONObject().put("author", item.uploaderName ?: "")
-        .put("avatar", best(item.uploaderAvatars, 48)).put("text", item.commentText?.content() ?: "")
-        .put("html", item.commentText?.type()?.name == "HTML").put("likes", item.likeCount)
+        .put("avatar", best(item.uploaderAvatars, 48)).put("text", plainText(item.commentText))
+        .put("html", false).put("likes", item.likeCount)
         .put("uploaded", item.textualUploadDate ?: "").put("pinned", item.isPinned)
         .put("hearted", item.isHeartedByUploader).put("replies", item.replyCount)
 }

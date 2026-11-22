@@ -89,12 +89,30 @@ object YoutubeAccount {
         return true
     }
 
+    /** The signed-in session as a Cookie header, for [WatchLink.send]; null when signed out. */
+    fun exportCookies(ctx: Context): String? {
+        val map = synchronized(lock) { cookies(ctx) }
+        if (!hasSession(map)) return null
+        return map.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
+    /** Watch: adopts a session received from the phone ([WatchLink]). */
+    fun importCookies(ctx: Context, header: String): Boolean {
+        val map = parseCookies(header)
+        if (!hasSession(map)) return false
+        synchronized(lock) { save(ctx, map) }
+        return true
+    }
+
     fun signOut(ctx: Context) {
         synchronized(lock) { prefs(ctx).edit().clear().apply() }
         // Also forget the WebView session, so the next sign-in can pick another account.
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            CookieManager.getInstance().removeAllCookies(null)
-            CookieManager.getInstance().flush()
+            // The watch has no WebView at all (its session came from the phone).
+            runCatching {
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+            }
         }
     }
 

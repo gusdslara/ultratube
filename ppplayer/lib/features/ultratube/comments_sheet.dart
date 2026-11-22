@@ -12,7 +12,10 @@ String plainComment(String html) => html
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')
     .replaceAll('&quot;', '"')
-    .replaceAll('&#39;', "'");
+    .replaceAll('&#39;', "'")
+    .replaceAll('&apos;', "'")
+    .replaceAllMapped(RegExp(r'&#(\d+);'), (m) => String.fromCharCode(int.parse(m[1]!)))
+    .replaceAll('&nbsp;', ' ');
 
 /// Comments of a video in a bottom sheet (Shorts). [countLabel] is YouTube's
 /// own count ("157"), shown in the title when known.
