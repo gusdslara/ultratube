@@ -23,6 +23,7 @@ import 'ask_sheet.dart';
 import 'pip_button.dart';
 import 'playlist_picker.dart';
 import 'queue_sheet.dart';
+import 'video_menu_sheet.dart';
 import 'comments_sheet.dart' show plainComment;
 import 'yt_widgets.dart';
 
@@ -536,20 +537,7 @@ class _Actions extends ConsumerWidget {
           pill(
             audioOnly ? Icons.headphones : Icons.headphones_outlined,
             'Só áudio',
-            () {
-              HapticFeedback.selectionClick();
-              final next = !audioOnly;
-              ref.read(audioOnlyProvider.notifier).set(next);
-              // Re-resolves the current video at the same position: audio
-              // only streams just the audio track (a fraction of the data).
-              ref.read(settingsProvider.notifier).setPlayerView(next ? PlayerView.artwork : PlayerView.video);
-              ScaffoldMessenger.of(context)
-                ..hideCurrentSnackBar()
-                ..showSnackBar(SnackBar(
-                  content: Text(next ? 'Só áudio: a imagem não é baixada' : 'Vídeo ligado'),
-                  duration: const Duration(seconds: 2),
-                ));
-            },
+            () => toggleAudioOnly(context, ref),
             active: audioOnly,
           ),
           pill(Icons.share_outlined, 'Compartilhar', () {
@@ -854,6 +842,20 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
   double? _drag;
   String? _flash;
 
+  /// Vertical drag on the picture: pulling down past [_menuPull] (or a quick
+  /// flick) opens the video menu (options, queue, playlist).
+  double _pull = 0;
+  static const _menuPull = 56.0;
+
+  void _openMenu([VideoMenuTab tab = VideoMenuTab.options]) =>
+      showVideoMenu(context, item: widget.item, live: widget.live, initial: tab);
+
+  void _pullEnd(DragEndDetails d) {
+    final open = _pull > _menuPull || (d.primaryVelocity ?? 0) > 600;
+    setState(() => _pull = 0);
+    if (open) _openMenu();
+  }
+
   /// Paused during a live: playback resumes behind the live edge.
   bool _behind = false;
 
@@ -921,7 +923,6 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
     });
     final state = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
-    final quality = ref.watch(videoQualityProvider);
     final autoplay = ref.watch(ultratubeAutoplayProvider);
     final chatPrefs = ref.watch(liveChatPrefsProvider);
     final audioOnly = !ref.watch(settingsProvider.select((s) => s.showVideo));
@@ -998,8 +999,15 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
               child: const ColoredBox(color: Colors.black38),
             ),
           ),
-          // Gestures: tap toggles controls, double-tap sides seeks ±10 s.
-          Row(
+          // Gestures: tap toggles controls, double-tap sides seeks ±10 s,
+          // dragging down opens the video menu.
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onVerticalDragStart: (_) => _pull = 0,
+            onVerticalDragUpdate: (d) => setState(() => _pull = (_pull + d.delta.dy).clamp(0.0, _menuPull * 2)),
+            onVerticalDragEnd: _pullEnd,
+            onVerticalDragCancel: () => setState(() => _pull = 0),
+            child: Row(
             children: [
               Expanded(
                 child: GestureDetector(
@@ -1018,6 +1026,35 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
               ),
             ],
           ),
+          ),
+          // Pull feedback: a chip slides in from the top while dragging.
+          if (_pull > 0)
+            IgnorePointer(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Transform.translate(
+                  offset: Offset(0, (_pull / 2).clamp(0.0, _menuPull) - 8),
+                  child: Opacity(
+                    opacity: (_pull / _menuPull).clamp(0.0, 1.0),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_pull > _menuPull ? Icons.expand_more : Icons.drag_handle, size: 16, color: Colors.white),
+                          const SizedBox(width: 6),
+                          Text(
+                            _pull > _menuPull ? 'Solte para abrir' : 'Opções · Fila · Playlist',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Transparent live chat over the picture (toggle + opacity in the
           // chat settings). Moves up while the controls are showing.
           if (showOverlay)
@@ -1081,15 +1118,10 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const PipButton(),
-                          PopupMenuButton<int>(
-                            tooltip: 'Qualidade',
+                          IconButton(
+                            tooltip: 'Opções do vídeo (ou arraste para baixo)',
                             icon: const Icon(Icons.settings_outlined, color: Colors.white),
-                            initialValue: quality,
-                            onSelected: ref.read(videoQualityProvider.notifier).set,
-                            itemBuilder: (_) => [
-                              for (final h in VideoQualityNotifier.options.reversed)
-                                CheckedPopupMenuItem(value: h, checked: h == quality, child: Text(h >= 2160 ? '${h}p 4K' : '${h}p')),
-                            ],
+                            onPressed: _openMenu,
                           ),
                         ],
                       ),
