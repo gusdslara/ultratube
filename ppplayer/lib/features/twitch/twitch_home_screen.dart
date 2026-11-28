@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/ultratube_theme.dart';
+import '../../core/twitch/twitch_account.dart';
 import '../../core/twitch/twitch_api.dart';
 import '../../core/twitch/twitch_providers.dart';
 import '../../core/twitch/twitch_store.dart';
-import '../ultratube/yt_widgets.dart' show Avatar, ErrorRetry, NetImage;
+import '../ultratube/yt_widgets.dart' show Avatar, ErrorRetry;
+import 'twitch_account_sheet.dart';
 import 'twitch_widgets.dart';
 
 enum _Tab { following, top, categories }
@@ -21,6 +23,7 @@ class TwitchHomeScreen extends ConsumerStatefulWidget {
 
 class _TwitchHomeScreenState extends ConsumerState<TwitchHomeScreen> {
   _Tab? _tab;
+  String? _genre; // Categorias: genre tag filter
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +35,8 @@ class _TwitchHomeScreenState extends ConsumerState<TwitchHomeScreen> {
     Future<void> refresh() async {
       switch (tab) {
         case _Tab.following:
+          // Signed in: also pick up channels followed on Twitch meanwhile.
+          await ref.read(twitchAccountProvider.notifier).syncFollows().then((_) {}, onError: (Object _) {});
           ref.invalidate(twitchFollowedProvider);
           await ref.read(twitchFollowedProvider.future).catchError((_) => <TwitchChannel>[]);
         case _Tab.top:
@@ -59,6 +64,7 @@ class _TwitchHomeScreenState extends ConsumerState<TwitchHomeScreen> {
               title: const _TwitchLogo(),
               actions: [
                 IconButton(tooltip: 'Buscar na Twitch', icon: const Icon(Icons.search), onPressed: () => context.push('/twitch/search')),
+                const _AccountButton(),
                 PopupMenuButton<String>(
                   tooltip: 'Idioma das transmissões',
                   icon: const Icon(Icons.translate_rounded),
@@ -118,6 +124,37 @@ class _TwitchHomeScreenState extends ConsumerState<TwitchHomeScreen> {
           ),
         ),
       ),
+      if (ref.watch(twitchGamesProvider).value case final games? when games.isNotEmpty)
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 4, 4),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('Categorias em alta', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+                    TextButton(onPressed: () => setState(() => _tab = _Tab.categories), child: const Text('Ver todas')),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: 196,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: games.length.clamp(0, 12),
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) => SizedBox(width: 104, child: TwitchGameTile(games[i])),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 10),
+                child: Text('Ao vivo agora', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
       ...top.when(
         loading: () => [const SliverToBoxAdapter(child: TwitchSkeleton())],
         error: (e, _) => [
@@ -143,12 +180,41 @@ class _TwitchHomeScreenState extends ConsumerState<TwitchHomeScreen> {
           child: Center(child: ErrorRetry(message: 'Não foi possível carregar as categorias.', onRetry: () => ref.invalidate(twitchGamesProvider))),
         ),
       ],
-      data: (list) => [SliverPadding(padding: const EdgeInsets.symmetric(horizontal: 12), sliver: twitchGameGrid(context, list))],
+      data: (list) {
+        // Genres present in the list, most common first.
+        final counts = <String, int>{};
+        for (final g in list) {
+          for (final t in g.tags) {
+            counts[t] = (counts[t] ?? 0) + 1;
+          }
+        }
+        final genres = (counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!))).take(14).toList();
+        final genre = genres.contains(_genre) ? _genre : null;
+        final shown = genre == null ? list : list.where((g) => g.tags.contains(genre)).toList();
+        return [
+          if (genres.isNotEmpty)
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 48,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  children: [
+                    TwitchChip(label: 'Todos os gêneros', selected: genre == null, onTap: () => setState(() => _genre = null)),
+                    for (final g in genres) TwitchChip(label: g, selected: genre == g, onTap: () => setState(() => _genre = g)),
+                  ],
+                ),
+              ),
+            ),
+          SliverPadding(padding: const EdgeInsets.symmetric(horizontal: 12), sliver: twitchGameGrid(context, shown)),
+        ];
+      },
     );
   }
 
   List<Widget> _following(BuildContext context) {
     final follows = ref.watch(twitchFollowsProvider);
+    final signedIn = ref.watch(twitchAccountProvider) != null;
     if (follows.isEmpty) {
       return [
         SliverFillRemaining(
@@ -163,14 +229,25 @@ class _TwitchHomeScreenState extends ConsumerState<TwitchHomeScreen> {
                   const SizedBox(height: UT.s3),
                   const Text('Siga canais para vê-los aqui', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   const SizedBox(height: UT.s2),
-                  const Text(
-                    'Os canais ficam salvos neste aparelho, sem conta da Twitch. Quem estiver ao vivo aparece primeiro.',
+                  Text(
+                    signedIn
+                        ? 'Sua conta ainda não segue nenhum canal. Siga canais aqui ou na Twitch; quem estiver ao vivo aparece primeiro.'
+                        : 'Entre na Twitch para trazer os canais que você já segue, ou siga canais só neste aparelho, sem conta.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: UT.text2),
+                    style: const TextStyle(color: UT.text2),
                   ),
                   const SizedBox(height: UT.s4),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: UT.twitch, foregroundColor: Colors.white),
+                  if (!signedIn) ...[
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: UT.twitch, foregroundColor: Colors.white),
+                      icon: const Icon(Icons.login_rounded),
+                      label: const Text('Entrar na Twitch'),
+                      onPressed: () => showTwitchAccountSheet(context),
+                    ),
+                    const SizedBox(height: UT.s2),
+                  ],
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: UT.text, side: const BorderSide(color: UT.line)),
                     icon: const Icon(Icons.search),
                     label: const Text('Buscar canais'),
                     onPressed: () => context.push('/twitch/search'),
@@ -259,193 +336,22 @@ class _TwitchLogo extends StatelessWidget {
   );
 }
 
-/// Search: channels (live first) and categories.
-class TwitchSearchScreen extends ConsumerStatefulWidget {
-  const TwitchSearchScreen({super.key});
-  @override
-  ConsumerState<TwitchSearchScreen> createState() => _TwitchSearchScreenState();
-}
-
-class _TwitchSearchScreenState extends ConsumerState<TwitchSearchScreen> {
-  final _input = TextEditingController();
-  String _query = '';
-
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  void _submit(String q) {
-    final query = q.trim();
-    if (query.isEmpty) return;
-    // A bare channel name/URL opens straight away.
-    final url = RegExp(r'twitch\.tv/([A-Za-z0-9_]{2,25})').firstMatch(query);
-    if (url != null) {
-      openTwitchChannel(context, url.group(1)!);
-      return;
-    }
-    setState(() => _query = query);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final results = _query.isEmpty ? null : ref.watch(twitchSearchProvider(_query));
-    return Scaffold(
-      backgroundColor: UT.bg,
-      appBar: AppBar(
-        backgroundColor: UT.bg,
-        surfaceTintColor: Colors.transparent,
-        titleSpacing: 0,
-        title: TextField(
-          controller: _input,
-          autofocus: true,
-          textInputAction: TextInputAction.search,
-          onSubmitted: _submit,
-          decoration: InputDecoration(
-            hintText: 'Buscar canais e categorias',
-            filled: true,
-            fillColor: UT.surface2,
-            isDense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-            suffixIcon: IconButton(
-              tooltip: 'Limpar',
-              icon: const Icon(Icons.close, size: 20),
-              onPressed: () {
-                _input.clear();
-                setState(() => _query = '');
-              },
-            ),
-          ),
-        ),
-        actions: [IconButton(tooltip: 'Buscar', icon: const Icon(Icons.search), onPressed: () => _submit(_input.text))],
-      ),
-      body: results == null
-          ? const Center(child: Text('Digite o nome de um canal ou jogo', style: TextStyle(color: UT.text2)))
-          : results.when(
-              loading: () => const Center(child: CircularProgressIndicator(color: UT.twitch)),
-              error: (e, _) => Center(child: ErrorRetry(message: 'A busca falhou.', onRetry: () => ref.invalidate(twitchSearchProvider(_query)))),
-              data: (r) {
-                final (channels, games) = r;
-                if (channels.isEmpty && games.isEmpty) {
-                  return const Center(child: Text('Nada encontrado.', style: TextStyle(color: UT.text2)));
-                }
-                return CustomScrollView(
-                  slivers: [
-                    if (games.isNotEmpty) ...[
-                      const SliverToBoxAdapter(
-                        child: Padding(padding: EdgeInsets.fromLTRB(16, 12, 16, 8), child: Text('Categorias', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-                      ),
-                      SliverToBoxAdapter(
-                        child: SizedBox(
-                          height: 210,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            itemCount: games.length,
-                            separatorBuilder: (_, _) => const SizedBox(width: 10),
-                            itemBuilder: (context, i) => SizedBox(width: 112, child: TwitchGameTile(games[i])),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (channels.isNotEmpty) ...[
-                      const SliverToBoxAdapter(
-                        child: Padding(padding: EdgeInsets.fromLTRB(16, 12, 16, 4), child: Text('Canais', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-                      ),
-                      SliverList.builder(itemCount: channels.length, itemBuilder: (context, i) => TwitchChannelTile(channels[i])),
-                    ],
-                    const SliverToBoxAdapter(child: SizedBox(height: 140)),
-                  ],
-                );
-              },
-            ),
-    );
-  }
-}
-
-/// One category's lives.
-class TwitchCategoryScreen extends ConsumerWidget {
-  const TwitchCategoryScreen({super.key, required this.name});
-  final String name;
+/// Opens the account sheet; shows the profile photo once signed in.
+class _AccountButton extends ConsumerWidget {
+  const _AccountButton();
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final language = ref.watch(twitchLanguageProvider);
-    final data = ref.watch(twitchCategoryProvider((name, language)));
-    return Scaffold(
-      backgroundColor: UT.bg,
-      body: RefreshIndicator(
-        color: UT.twitch,
-        onRefresh: () async {
-          ref.invalidate(twitchCategoryProvider((name, language)));
-          await ref.read(twitchCategoryProvider((name, language)).future).catchError((_) => (null, <TwitchStream>[]));
-        },
-        child: CustomScrollView(
-          slivers: [
-            SliverAppBar(
-              pinned: true,
-              backgroundColor: UT.bg,
-              surfaceTintColor: Colors.transparent,
-              title: Text(data.value?.$1?.displayName ?? name),
-              actions: [
-                PopupMenuButton<String>(
-                  tooltip: 'Idioma',
-                  icon: const Icon(Icons.translate_rounded),
-                  initialValue: language,
-                  onSelected: ref.read(twitchLanguageProvider.notifier).set,
-                  itemBuilder: (_) => [
-                    for (final e in TwitchLanguageNotifier.options.entries)
-                      CheckedPopupMenuItem(value: e.key, checked: e.key == language, child: Text(e.value)),
-                  ],
-                ),
-              ],
+    final account = ref.watch(twitchAccountProvider);
+    return IconButton(
+      tooltip: account == null ? 'Entrar na Twitch' : 'Conta da Twitch (${account.name})',
+      onPressed: () => showTwitchAccountSheet(context),
+      icon: account == null || account.avatar.isEmpty
+          ? Icon(account == null ? Icons.account_circle_outlined : Icons.account_circle, color: account == null ? null : UT.twitch)
+          : Container(
+              padding: const EdgeInsets.all(1.5),
+              decoration: const BoxDecoration(shape: BoxShape.circle, color: UT.twitch),
+              child: Avatar(account.avatar, size: 24),
             ),
-            if (data.value?.$1 case final game?)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 72,
-                        child: AspectRatio(
-                          aspectRatio: 285 / 380,
-                          child: ClipRRect(borderRadius: BorderRadius.circular(UT.rSm), child: NetImage(game.boxArt, icon: Icons.sports_esports_outlined)),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(game.displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 4),
-                            Text(viewersLabel(game.viewers), style: const TextStyle(color: UT.text2)),
-                            Text('${data.value!.$2.length} lives · ${TwitchLanguageNotifier.options[language]}', style: const TextStyle(color: UT.text2)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ...data.when(
-              loading: () => [const SliverToBoxAdapter(child: TwitchSkeleton())],
-              error: (e, _) => [
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Center(child: ErrorRetry(message: 'Não foi possível abrir a categoria.', onRetry: () => ref.invalidate(twitchCategoryProvider((name, language))))),
-                ),
-              ],
-              data: (d) => d.$2.isEmpty
-                  ? [const SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('Ninguém ao vivo nesta categoria e idioma.', style: TextStyle(color: UT.text2))))]
-                  : [twitchStreamSliver(context, d.$2)],
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 140)),
-          ],
-        ),
-      ),
     );
   }
 }

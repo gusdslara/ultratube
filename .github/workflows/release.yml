@@ -1,0 +1,118 @@
+name: Release
+
+# Push a tag like v1.0.7 to build every platform and publish a GitHub Release
+# with the files and SHA256SUMS.txt. Android APKs are attached only when the
+# release keystore is configured as repository secrets (ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD); otherwise
+# the maintainer uploads locally signed APKs and re-runs the checksum step.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach to its release
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.47.4'
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  android:
+    name: Android (phone + watch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      signed: ${{ steps.keystore.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Release keystore
+        id: keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ]; then echo "signed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.jks" "$KS_PASS" "$KEY_ALIAS" "$KEY_PASS" | tee android/key.properties > ppplayer/android/key.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - name: Build phone APK
+        working-directory: ppplayer
+        run: flutter pub get && flutter build apk --release
+      - name: Build watch APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew --no-daemon :wear:assembleRelease
+      - name: Collect
+        run: |
+          mkdir -p out
+          PV=$(grep '^version:' ppplayer/pubspec.yaml | sed 's/version: //; s/+.*//' | tr -d ' \r')
+          WV=$(grep -o 'versionName = "[^"]*"' android/wear/build.gradle.kts | cut -d'"' -f2)
+          cp ppplayer/build/app/outputs/flutter-apk/app-release.apk "out/Ultratube-phone-$PV.apk"
+          cp android/wear/build/outputs/apk/release/wear-release.apk "out/Ultratube-watch-$WV.apk"
+          rm -f android/key.properties ppplayer/android/key.properties
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ultratube-Android
+          path: out/*.apk
+          if-no-files-found: error
+
+  desktop:
+    uses: ./.github/workflows/ultratube-desktop.yml
+
+  ios:
+    uses: ./.github/workflows/ios.yml
+
+  publish:
+    name: Publish GitHub Release
+    needs: [android, desktop, ios]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: Ultratube-*
+          merge-multiple: true
+      - name: Drop unsigned Android builds
+        if: needs.android.outputs.signed != 'true'
+        run: rm -f dist/*.apk
+      - name: Create or update the release
+        run: |
+          ls -lh dist
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            notes=docs/release-notes/$TAG.md
+            if [ -f "$notes" ]; then gh release create "$TAG" --title "Ultratube $TAG" --notes-file "$notes" --verify-tag
+            else gh release create "$TAG" --title "Ultratube $TAG" --generate-notes --verify-tag; fi
+          fi
+          gh release upload "$TAG" dist/* --clobber
+      - name: SHA256SUMS.txt over every release asset
+        run: |
+          rm -rf sums && mkdir sums && cd sums
+          gh release download "$TAG" --skip-existing
+          rm -f SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber

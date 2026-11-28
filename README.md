@@ -1,139 +1,215 @@
-# Ultratube
+<p align="center">
+  <img src="docs/portfolio/logo/ultratube-wordmark-escuro.png" alt="Ultratube" width="480">
+</p>
 
-Cliente de **YouTube, YouTube Music e Twitch sem anúncios**, para celular Android e
-**Galaxy Watch (Wear OS)**. Não precisa de conta Google: inscrições, histórico,
-playlists e downloads ficam no próprio aparelho.
+<p align="center">
+  <b>Ad-free YouTube, YouTube Music and Twitch for Android phones and Galaxy Watch / Wear OS.</b><br>
+  No Google account required: subscriptions, history, playlists and downloads stay on your device.
+</p>
 
-| App | Pacote | Versão | Testado em |
-|---|---|---|---|
-| Celular (Flutter) | `app.ultratube.mobile` | 1.0.3 | Galaxy S23 |
-| Relógio (Kotlin, Wear OS) | `app.ultratube.wear` | 0.4.1 | Galaxy Watch 7 (SM-L300) |
+<p align="center">
+  <a href="https://github.com/gusdslara/ultratube/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/gusdslara/ultratube?sort=semver&label=release"></a>
+  <a href="https://github.com/gusdslara/ultratube/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gusdslara/ultratube/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Android%20%7C%20Wear%20OS%20%7C%20Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20iOS-555">
+</p>
 
-## De onde veio
+<p align="center">
+  <img src="docs/portfolio/destaque-celular.png" alt="Ultratube on an Android phone" width="560">
+</p>
 
-O app do celular é um **fork do [PPPlayer](https://github.com/ppplayer-labs/app)**
-(Flutter), a partir do commit `6cea891`. Sobre essa base o Ultratube:
+> **Disclaimer.** Ultratube is an independent, non-commercial project. It is **not affiliated with,
+> endorsed or sponsored by YouTube, Google LLC, Twitch or Samsung**. All trademarks belong to their
+> respective owners. Ultratube does not host any content; it plays what the services publicly serve.
+> Use it in accordance with the laws and terms that apply to you.
 
-- **tirou todos os anúncios**: removeu o Google Mobile Ads e trocou o player/WebView do
-  YouTube por extração própria (NewPipeExtractor) + MediaKit;
-- ganhou identidade própria (nome, ícone, splash, tema preto OLED + vermelho);
-- ganhou tudo o que está na lista abaixo.
+## Download
 
-O app do relógio e a biblioteca `android/media` são **código novo**, escritos para o Ultratube.
+Grab the files from the [latest release](https://github.com/gusdslara/ultratube/releases/latest)
+and verify them with `SHA256SUMS.txt` (`sha256sum -c SHA256SUMS.txt --ignore-missing`).
 
-## Recursos
+| Platform | File | Status |
+|---|---|---|
+| Android phone (8.0+, arm64-v8a / x86_64) | `Ultratube-phone-<version>.apk` | Main target, tested on Galaxy S23 (Android 16) |
+| Galaxy Watch / Wear OS 3+ | `Ultratube-watch-<version>.apk` | Main target, tested on Galaxy Watch 7 |
+| Windows 10/11 x64 | `Ultratube-<version>-windows-x64.zip` | Experimental: extract and run `ppplayer.exe` |
+| Linux x64 | `Ultratube-<version>-x86_64.AppImage`, `Ultratube-<version>-linux-x64.tar.gz` | Experimental |
+| macOS 11+ (Apple Silicon / Intel) | `Ultratube-<version>-macos.zip` | Experimental, ad-hoc signed |
+| iOS / iPadOS | `Ultratube-<version>-ios-unsigned.ipa` | Experimental, unsigned, for sideloading |
 
-**Celular**
-- Início "Para você" (inscrições + "a seguir" do que você viu + categorias), Shorts em feed
-  vertical, busca com sugestões e filtros (vídeos, músicas, canais, playlists, álbuns, Shorts).
-- Inscrições locais com feed por RSS; importa Google Takeout (`subscriptions.csv`),
-  NewPipe e LibreTube.
-- Tela Assistir até 4K, toque duplo ±10 s, comentários, "A seguir" com reprodução contínua,
-  fila estilo YouTube (arrastar, embaralhar, repetir, salvar como playlist).
-- **SponsorBlock** automático (patrocínio, autopromoção, pedidos de inscrição).
-- **Downloads offline**: áudio M4A ou vídeo 720p/1080p (sem recodificar), com capa e fila em
-  segundo plano.
-- **Lives do YouTube** com chat ao vivo sobre o vídeo e contador de espectadores.
-- **Twitch sem anúncios**: aba própria (seguindo, ao vivo, categorias, VODs, chat com emotes
-  7TV/BTTV). Um proxy HLS local remove os intervalos comerciais.
-- **Perguntar (Gemini)**: resumo e explicação do vídeo com marcas de tempo clicáveis, usando a
-  chave do Google AI Studio do próprio usuário.
-- Letras via LRCLIB.
+The desktop and iOS builds come straight from GitHub Actions and have not been tested on real
+hardware yet. Feedback is welcome in [Issues](https://github.com/gusdslara/ultratube/issues).
 
-**Relógio (Galaxy Watch)**
-- App independente: não precisa do celular para tocar.
-- Busca por voz/texto, música, vídeo (até 360p) e Shorts; fila, favoritos e letras.
-- Downloads offline no próprio relógio, timer para pausar (15–90 min) e tela apagada com
-  áudio continuando.
+### Installing
 
-## Estrutura
+- **Phone**: download the APK on the phone and open it (allow "install unknown apps" for your browser
+  or file manager), or `adb install Ultratube-phone-<version>.apk`.
+- **Watch**: enable *Developer options › ADB debugging* and *Debug over Wi-Fi* on the watch, then
+  `adb connect <watch-ip>:<port>` and `adb install Ultratube-watch-<version>.apk`
+  (or use a sideloading app such as *Bugjaeger* / *Wear Installer*).
+- **macOS**: unzip, move the app (`PPPlayer.app`, the upstream bundle name) to Applications, then
+  right-click › *Open* the first time (or run `xattr -dr com.apple.quarantine` on it).
+- **Linux**: `chmod +x Ultratube-*.AppImage && ./Ultratube-*.AppImage`. The tarball needs `libmpv`
+  installed from your distribution.
+- **iOS**: the `.ipa` is **not signed**. Sign and install it yourself with
+  [AltStore](https://altstore.io) / [SideStore](https://sidestore.io), [Sideloadly](https://sideloadly.io)
+  (free Apple ID: re-sign every 7 days), [TrollStore](https://github.com/opa334/TrollStore) on supported
+  iOS versions, or a jailbroken device.
+
+> **Upgrading from 1.0.7 or older builds:** releases from v1.0.7 on are signed with a new release key.
+> Builds shared before (signed with a debug key) cannot be updated in place — uninstall the old app once,
+> then install the new APK. Downloads and settings stored by the old build are removed with it.
+
+## Highlights
+
+- **No ads and no YouTube WebView**: its own extraction (NewPipeExtractor + the app client) and an
+  mpv-based player on the phone, Media3 on the watch.
+- **Real audio-only mode**: only the audio track is downloaded, in economy (~50 kbps), normal or high
+  quality.
+- **Shorts** from the real YouTube feed (your account's when signed in), with pull to refresh.
+- **Ad-free Twitch**: a local HLS proxy strips commercial breaks; chat with 7TV/BTTV emotes.
+- **Galaxy Watch both ways**: a standalone watch app that plays on its own (Wi-Fi/LTE) **and** full
+  control of the phone app from the watch, queue included.
+
+## Features
+
+### Phone
+
+- **Home**: "For you" (with an account, your YouTube home; without one, subscriptions plus "up next"
+  from your history), and Music, Live, Gaming and Podcasts tabs.
+- **Search** with suggestions and filters (videos, Shorts, songs, channels, playlists, albums).
+- **Watch**: up to 4K, double tap ±10 s, fullscreen, description, comments, "Up next" with autoplay and a
+  YouTube-style queue (drag, shuffle, repeat, save as playlist).
+- **Audio only**, **audio quality** and **mobile-data saver** (off Wi-Fi: video up to 480p and economy
+  audio). In the background without picture-in-picture, video stops downloading and only audio continues.
+- **Picture-in-picture** in the video's aspect ratio (vertical for Shorts).
+- **Shorts**: vertical feed with preloading, comments, likes, pull down for a fresh feed.
+- **SponsorBlock** (sponsors, self-promotion, subscribe reminders).
+- **Offline downloads**: M4A audio or 480p/720p/1080p video, with cover art, in the background.
+- **YouTube live streams** with chat overlay and viewer count.
+- **Twitch**: following (with or without an account, via twitch.tv/activate), live now, categories,
+  VODs and chat.
+- **Ask (Gemini)**: video summary and explanation with timestamps, using your own Google AI Studio key.
+- **Optional YouTube account** (regular Google sign-in page, no API key) and subscription import
+  (Google Takeout, NewPipe, LibreTube).
+- Lyrics from LRCLIB.
+
+### The watch controlling the phone (no watch app needed)
+
+The phone app publishes a full media session that the Galaxy Watch media controls (and headphones,
+car and lock screen) use: artwork, title and channel; play/pause, previous/next, ±10 s and volume;
+**the phone's queue shows up on the watch**; Shorts navigation; works with the phone locked in a pocket.
+
+<p align="center">
+  <img src="docs/portfolio/destaque-relogio-controle.png" alt="Galaxy Watch controlling Ultratube on the phone" width="560">
+</p>
+
+### Watch app (Galaxy Watch / Wear OS)
+
+- **Standalone**: plays without the phone nearby, with the screen off.
+- Voice or text search; Songs · Videos (up to 360p) · Shorts.
+- **Shorts** from the real YouTube feed, swiping up/down.
+- **YouTube account via the phone**: Wear OS cannot open Google's sign-in page, so the signed-in phone
+  sends the session over Wi-Fi, encrypted (QR or code in *You › Connect watch*).
+- Ad-free Twitch, YouTube live streams, lyrics, queue, favourites, offline downloads and a sleep timer
+  (15–90 min). Ongoing Activity icon on the watch face while playing.
+
+<p align="center">
+  <img src="docs/portfolio/destaque-relogio-app.png" alt="Ultratube watch app on a Galaxy Watch" width="720">
+</p>
+
+All screenshots (28 phone, 20 watch, 3 watch-as-remote), the logo and the feature images are in
+[`docs/portfolio/`](docs/portfolio/README.md).
+
+## How it works
 
 ```
-ppplayer/           app do celular (fork Flutter do PPPlayer) — também gera iOS
-android/media/      biblioteca nativa compartilhada: catálogo NewPipe, player Media3,
-                    downloads, SponsorBlock (usada pelo celular e pelo relógio)
-android/wear/       app do Galaxy Watch (Wear OS)
-docs/DIARIO.md      diário detalhado de cada rodada de desenvolvimento e testes
-docs/verificacao/   evidências de teste no relógio
-.github/workflows/  build do iOS sem assinatura (disparo manual)
+                 ┌──────────────── android/media (Kotlin) ────────────────┐
+                 │ Catalog · PlayerFallback · AudioQuality · YoutubeAccount │
+                 │ Downloads · Twitch · WatchLink                           │
+                 └───────────────┬──────────────────────────┬─────────────┘
+                                 │ plugin (MethodChannel)    │ direct calls
+          ┌──────────────────────▼──────┐        ┌──────────▼─────────────────┐
+          │ Phone — Flutter (ppplayer)  │        │ Watch — Kotlin (wear)       │
+          │ MediaKit/mpv · audio_service │  Wi-Fi │ Media3/ExoPlayer · Views    │
+          │ media session ───────────────┼───BT──▶│ Galaxy Watch media controls │
+          │ "Connect watch" ─────────────┼──AES──▶│ "Sign in with phone"        │
+          └──────────────────────────────┘        └────────────────────────────┘
 ```
 
-O build Android do celular inclui `android/media` como módulo Gradle
-(`ppplayer/android/settings.gradle.kts`), então as duas pastas precisam ficar lado a lado.
+Phone (Flutter) and watch (Kotlin) are separate apps, but everything that is not UI lives in one place,
+`android/media/`: search, channels, playlists, stream extraction, Shorts, audio track selection,
+YouTube account (InnerTube with cookies), the encrypted watch sign-in protocol, lyrics and downloads.
+iOS cannot run Kotlin, so `ppplayer/lib/core/api/dart_catalog.dart` and
+`ppplayer/lib/core/ultratube/dart_account.dart` are Dart ports that follow the same rules and JSON
+formats. Library versions shared by both Gradle builds are in `android/gradle/libs.versions.toml`.
 
-## Compilar
+## Repository layout
 
-Requisitos: Flutter (Dart ≥ 3.12), JDK 17+ e Android SDK 35. O `local.properties` e as
-chaves de assinatura não são versionados.
+```
+ppplayer/                 phone app (Flutter fork of PPPlayer) — also builds iOS and desktop
+android/media/            native library shared by the phone and the watch
+android/wear/             Galaxy Watch (Wear OS) app
+docs/DIARIO.md            development log (Portuguese)
+docs/portfolio/           screenshots, logo and feature images
+.github/workflows/        CI, desktop, iOS and release workflows
+```
+
+The phone's Android build includes `android/media` as a Gradle module
+(`ppplayer/android/settings.gradle.kts`), so both folders must stay side by side.
+
+## Building from source
+
+Requirements: Flutter 3.47 (Dart ≥ 3.12), **JDK 17** (the watch's Gradle does not run on JDK 25) and
+Android SDK 35.
 
 ```sh
-# celular
+# phone
 cd ppplayer
 flutter pub get
-flutter build apk --release      # ou: flutter run
+flutter build apk --release
 
-# relógio
+# watch
 cd android
-./gradlew :wear:assembleDebug
-adb -s <relógio> install -r wear/build/outputs/apk/debug/wear-debug.apk
+./gradlew :wear:assembleRelease
 ```
 
-No Windows, o `flutter pub get` precisa do Modo de Desenvolvedor ligado (links simbólicos).
-Para o build release assinado, crie `ppplayer/android/key.properties` com `storeFile`,
-`storePassword`, `keyAlias` e `keyPassword`; sem ele, o release usa a chave de debug.
+Release signing: create `ppplayer/android/key.properties` and/or `android/key.properties` with
+`storeFile`, `storePassword`, `keyAlias` and `keyPassword` (never committed). Without them, release
+builds fall back to the debug key. On Windows, `flutter pub get` needs Developer Mode (symlinks).
 
-**iOS**: GitHub Actions › *Ultratube iOS (unsigned IPA)* gera um `.ipa` sem assinatura para
-instalar com Sideloadly/AltStore. No iOS o catálogo é um port em Dart
-(`ppplayer/lib/core/api/`). Ainda não foi testado num iPhone.
+Desktop and iOS builds run on GitHub Actions: *Ultratube Desktop* and *Ultratube iOS (unsigned IPA)*
+can be started manually, and pushing a `v*` tag runs the *Release* workflow, which builds every
+platform and attaches the files and `SHA256SUMS.txt` to the GitHub Release.
 
-## Limites conhecidos
+## Known limitations
 
-- Alguns Shorts voltam como indisponíveis no NewPipeExtractor v0.27.1 e são pulados.
-- A Twitch só deixa listar as 30 maiores lives em "Ao vivo agora" sem token de integridade.
-- Ainda falta testar no aparelho: lives no S23, Perguntar com chave real, bateria e Bluetooth
-  no relógio. Detalhes em [`docs/DIARIO.md`](docs/DIARIO.md).
+- Playing from the watch/headphones **while the app has been killed by the system** does not start
+  yet: the Flutter engine resolves the stream, but mpv only finishes initialising with the app's
+  screen. With the app open or in the background (the normal case) it works, phone locked included.
+- Some Shorts come back unavailable in NewPipeExtractor v0.27.1 and are skipped.
+- Phone and watch share the same YouTube session; if Google rotates the cookies on one, the other may
+  need to reconnect.
+- Twitch only lists the top 30 live channels in "Live now" without an integrity token.
+- The UI is in Portuguese (pt-BR).
+- Not tested yet: Ask with a real key, battery/Bluetooth on the watch, iOS and desktop.
 
-## Licença
+## Credits
 
-- Código novo em `android/` e a distribuição Android/Wear combinada: **GPL-3.0-or-later**
-  (usa NewPipeExtractor, GPL-3.0). Veja `android/LICENSE` e `android/NOTICE.md`.
-- `ppplayer/`: licença do PPPlayer preservada em `ppplayer/COPYING` e `ppplayer/assets/LICENSE`;
-  notas do fork em `ppplayer/ULTRATUBE-NOTICE.md`.
-- Media3 e OkHttp: Apache-2.0.
+- Phone app forked from **[PPPlayer](https://github.com/ppplayer-labs/app)** (MIT), commit `6cea891`.
+  Ultratube removed its ads (Google Mobile Ads and the YouTube player/WebView, replaced by its own
+  extraction + MediaKit) and added everything described above. The watch app and `android/media` are new code.
+- **[NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor)** (GPL-3.0),
+  **[media_kit](https://github.com/media-kit/media-kit)** / **[mpv](https://mpv.io)**,
+  **[AndroidX Media3](https://github.com/androidx/media)**, **[SponsorBlock](https://sponsor.ajay.app)**,
+  **[LRCLIB](https://lrclib.net)**, **[7TV](https://7tv.app)** and **[BetterTTV](https://betterttv.com)**.
+- Full list with licenses: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-Ao distribuir um APK, o código-fonte correspondente precisa estar disponível (este repositório).
-Projeto pessoal, sem relação com o Google, o YouTube ou a Twitch.
+## License
 
-### Relógio 0.5 e desktop (18/11/2026)
+[GPL-3.0](LICENSE). New code in `android/` and the combined Android/Wear distribution are
+GPL-3.0-or-later (they link NewPipeExtractor, GPL-3.0); see `android/NOTICE.md`. `ppplayer/` keeps the
+PPPlayer notice in `ppplayer/assets/LICENSE` and the fork notes in `ppplayer/ULTRATUBE-NOTICE.md`.
+The corresponding source for every released binary is the tagged commit in this repository.
 
-- **Relógio — fim do "processo invisível"**: a notificação de reprodução agora
-  é uma *Ongoing Activity* do Wear OS (ícone do Ultratube no mostrador enquanto
-  toca, que leva de volta ao player) com Pausar/Próxima/**Parar**. Fechar o app
-  (voltar na tela inicial ou remover dos recentes) para a música e encerra o
-  serviço; sair pela coroa continua tocando, com o ícone para voltar. Pausado
-  e sem nenhuma tela do Ultratube aberta, o serviço se encerra sozinho em 5 min.
-- **Correção Android 16 (Galaxy Watch 7)**: com o voltar preditivo o
-  `onBackPressed` nunca era chamado — o voltar das sub-telas saía do app e
-  fechar não parava nada. Agora usa `OnBackInvokedDispatcher`.
-- **Relógio — Twitch e lives do YouTube**: "Twitch ao vivo" (mais vistas em
-  português + busca de canal) e "Lives do YouTube". Twitch toca em vídeo 360p
-  (segure para só áudio) com o mesmo filtro de anúncios do celular, portado
-  para Kotlin (`android/media/.../Twitch.kt`, servido ao ExoPlayer como
-  playlist gerada). Lives do YouTube tocam uma variante HLS + áudio. O player
-  mostra "● AO VIVO" e alterna vídeo/só áudio também em lives.
-- Validado no Galaxy Watch 7 (Android 16): Twitch em vídeo, 60 s no mostrador
-  continuando a tocar com o ícone, voltar das sub-telas, fechar → serviço e
-  notificação encerrados; live do YouTube em vídeo.
-- **Desktop (Windows, macOS, Linux)**: o shell do Ultratube (feed, Twitch,
-  chat ao vivo, Perguntar, player próprio com MediaKit e catálogo Dart) agora
-  roda no desktop. Janelas largas usam barra lateral (com rótulos a partir de
-  1200 px) e mini player; a tela Assistir limita o player à altura da janela e
-  leva "A seguir" para uma coluna lateral a partir de 1280 px; na Twitch o chat
-  vira coluna à direita. Paisagem só vira tela cheia no celular; no desktop é o
-  botão ou a tecla F (tela cheia real da janela), Espaço pausa, e passar o mouse
-  mostra os controles. Login Google fica só no celular (precisa do WebView nativo).
-- Builds desktop: workflow manual "Ultratube Desktop" (`.github/workflows/
-  ultratube-desktop.yml`) gera Windows x64 (.zip), Linux x64 (.tar.gz) e macOS
-  (.app com assinatura ad-hoc). Compilar Windows localmente exige o Modo de
-  Desenvolvedor do Windows (links simbólicos dos plugins); por isso a interface
-  desktop ainda não foi vista rodando.
+Leia em português: [README.pt-BR.md](README.pt-BR.md).

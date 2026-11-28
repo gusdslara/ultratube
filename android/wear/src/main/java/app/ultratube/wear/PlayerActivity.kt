@@ -195,7 +195,14 @@ class PlayerActivity : ComponentActivity() {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
                 if (e1 == null || abs(vy) < abs(vx) || abs(e2.y - e1.y) < dp(40)) return false
                 // Vertical swipe: next/previous (Shorts style); also works for any queue.
-                controller?.let { if (vy < 0) { if (it.hasNextMediaItem()) it.seekToNextMediaItem() } else it.seekToPreviousMediaItem() }
+                controller?.let {
+                    when {
+                        vy < 0 -> if (it.hasNextMediaItem()) it.seekToNextMediaItem()
+                        // Pull down on the first Short: a fresh feed (YouTube's gesture).
+                        it.currentMediaItemIndex == 0 && WatchShorts.active -> refreshShorts()
+                        else -> it.seekToPreviousMediaItem()
+                    }
+                }
                 return true
             }
         })
@@ -216,7 +223,9 @@ class PlayerActivity : ComponentActivity() {
         col.addView(ctlTitle, LinearLayout.LayoutParams(dp(132), -2))
         col.addView(ctlTime)
         val main = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(6)) }
-        main.addView(round(R.drawable.ic_prev_fill, "Anterior", 40, Ut.SURFACE) { controller?.seekToPreviousMediaItem() })
+        main.addView(round(R.drawable.ic_prev_fill, "Anterior", 40, Ut.SURFACE) {
+            controller?.let { if (it.currentMediaItemIndex == 0 && WatchShorts.active) refreshShorts() else it.seekToPreviousMediaItem() }
+        })
         ctlPlay = round(R.drawable.ic_play_fill, "Reproduzir", 56, Ut.RED) { togglePlay() }
         main.addView(ctlPlay, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginStart = dp(8); marginEnd = dp(8) })
         main.addView(round(R.drawable.ic_next_fill, "Próximo", 40, Ut.SURFACE) { controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() } })
@@ -244,6 +253,11 @@ class PlayerActivity : ComponentActivity() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(22), dp(28), dp(22), dp(64)) }
         col.addView(TextView(this).apply { text = "A seguir"; textSize = 15f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Ut.TEXT); gravity = Gravity.CENTER })
         val actions = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(8)) }
+        // Shorts feed: "Atualizar" on its own row (three chips don't fit the round screen).
+        if (WatchShorts.active) col.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0)
+            addView(chip("Atualizar") { refreshShorts() }, LinearLayout.LayoutParams(-2, dp(32)))
+        })
         actions.addView(chip("Baixar") { download() })
         actions.addView(chip("Timer") { timer() }, LinearLayout.LayoutParams(-2, dp(32)).apply { marginStart = dp(6) })
         col.addView(actions)
@@ -353,6 +367,23 @@ class PlayerActivity : ComponentActivity() {
         val next = options[(options.indexOfFirst { it * 60_000L >= PlaybackService.sleepAt - System.currentTimeMillis() }.coerceAtLeast(0) + 1) % options.size]
         PlaybackService.sleepTimer(next)
         toast(if (next == 0) "Timer desligado" else "Pausa em $next min")
+    }
+
+    private var refreshing = false
+
+    /** New Shorts from YouTube in place of the current feed. */
+    private fun refreshShorts() {
+        val c = controller ?: return
+        if (refreshing) return
+        refreshing = true
+        spinner.visibility = View.VISIBLE
+        toast("Atualizando Shorts…")
+        WatchShorts.refresh(this, c) { error ->
+            refreshing = false
+            if (isDestroyed) return@refresh
+            spinner.visibility = View.GONE
+            if (error != null) toast(error) else pager.setCurrentItem(PAGE_NOW, true)
+        }
     }
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()

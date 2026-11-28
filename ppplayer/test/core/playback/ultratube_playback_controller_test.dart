@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pp_playback_engine/pp_playback_engine.dart';
 import 'package:ppplayer/core/playback/ultratube_playback_controller.dart';
@@ -7,9 +8,15 @@ class RecordingEngine extends Fake implements PlaybackController {
   final opened = <PlaybackTrack>[];
   final starts = <Duration>[];
   final intents = <bool>[];
+  final _status = StreamController<PlaybackStatus>.broadcast(sync: true);
   PlaybackStatus status = const PlaybackStatus();
   @override
   PlaybackStatus get currentStatus => status;
+  @override
+  Stream<PlaybackStatus> get statusStream => _status.stream;
+
+  /// Simulates the native player reporting [next].
+  void emit(PlaybackStatus next) => _status.add(status = next);
   @override
   Future<void> stop() async {}
   @override
@@ -46,7 +53,7 @@ void main() {
     final controller = UltratubePlaybackController(
       engine,
       video: () => videoMode,
-      resolve: (_, {required video}) async {
+      resolve: (_, {required video, required maxHeight, required audio}) async {
         if (video) throw StateError('No video stream');
         return {'stream': 'https://example.com/audio'};
       },
@@ -64,7 +71,7 @@ void main() {
     final controller = UltratubePlaybackController(
       engine,
       video: () => false,
-      resolve: (id, {required video}) => (pending[id] = Completer()).future,
+      resolve: (id, {required video, required maxHeight, required audio}) => (pending[id] = Completer()).future,
     );
     final a = controller.play(first);
     await Future<void>.delayed(Duration.zero);
@@ -86,7 +93,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => false,
-        resolve: (_, {required video}) => pending.future,
+        resolve: (_, {required video, required maxHeight, required audio}) => pending.future,
       );
       final playing = controller.play(first);
       await Future<void>.delayed(Duration.zero);
@@ -102,7 +109,7 @@ void main() {
     final controller = UltratubePlaybackController(
       engine,
       video: () => false,
-      resolve: (_, {required video}) => pending.future,
+      resolve: (_, {required video, required maxHeight, required audio}) => pending.future,
     );
     final playing = controller.play(first);
     await Future<void>.delayed(Duration.zero);
@@ -120,7 +127,7 @@ void main() {
       final controller = UltratubePlaybackController(
         engine,
         video: () => videoMode,
-        resolve: (_, {required video}) async {
+        resolve: (_, {required video, required maxHeight, required audio}) async {
           modes.add(video);
           return {'stream': 'https://example.com/media'};
         },
@@ -139,4 +146,96 @@ void main() {
       expect(engine.opened.last.isVideo, true);
     },
   );
+
+  group('connection recovery', () {
+    test('a stream error is re-extracted and resumed where it stopped', () async {
+      final engine = RecordingEngine();
+      var resolves = 0;
+      final controller = UltratubePlaybackController(
+        engine,
+        video: () => false,
+        resolve: (_, {required video, required maxHeight, required audio}) async {
+          resolves++;
+          return {'stream': 'https://example.com/audio$resolves'};
+        },
+      );
+      final seen = <PlaybackStatus>[];
+      controller.statusStream.listen(seen.add);
+      await controller.play(first);
+      engine.emit(engine.status.copyWith(position: const Duration(seconds: 95)));
+      engine.emit(
+        engine.status.copyWith(
+          state: PlaybackState.error,
+          error: 'error:connection_lost',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      // The UI never sees the error: it is shown as buffering.
+      expect(seen.last.state, PlaybackState.buffering);
+      expect(seen.last.error, isNull);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(resolves, 2);
+      expect(engine.opened.length, 2);
+      expect(engine.opened.last.networkMediaUri, 'https://example.com/audio2');
+      expect(engine.starts.last, const Duration(seconds: 95));
+      expect(engine.intents.last, true);
+    });
+
+    test('transient extraction failures are retried on play', () async {
+      final engine = RecordingEngine();
+      var calls = 0;
+      final controller = UltratubePlaybackController(
+        engine,
+        video: () => false,
+        resolve: (_, {required video, required maxHeight, required audio}) async {
+          if (++calls == 1) {
+            throw PlatformException(code: 'ultratube_error', message: 'timeout');
+          }
+          return {'stream': 'https://example.com/audio'};
+        },
+      );
+      await controller.play(first);
+      expect(calls, 2);
+      expect(engine.opened.single.networkMediaUri, 'https://example.com/audio');
+    });
+
+    test('unavailable content is not retried', () async {
+      final engine = RecordingEngine();
+      var calls = 0;
+      final controller = UltratubePlaybackController(
+        engine,
+        video: () => false,
+        resolve: (_, {required video, required maxHeight, required audio}) async {
+          calls++;
+          throw PlatformException(code: 'unavailable', message: 'Private video');
+        },
+      );
+      await expectLater(controller.play(first), throwsA(isA<PlatformException>()));
+      expect(calls, 1);
+      expect(engine.opened, isEmpty);
+    });
+
+    test('an error is surfaced once recovery cannot succeed', () async {
+      final engine = RecordingEngine();
+      var calls = 0;
+      final controller = UltratubePlaybackController(
+        engine,
+        video: () => false,
+        resolve: (_, {required video, required maxHeight, required audio}) async {
+          if (++calls > 1) {
+            throw PlatformException(code: 'unavailable', message: 'Removed');
+          }
+          return {'stream': 'https://example.com/audio'};
+        },
+      );
+      final seen = <PlaybackStatus>[];
+      controller.statusStream.listen(seen.add);
+      await controller.play(first);
+      engine.emit(engine.status.copyWith(state: PlaybackState.error, error: 'error:forbidden'));
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(seen.last.state, PlaybackState.error);
+      expect(seen.last.error, 'error:unavailable');
+      expect(engine.opened.length, 1);
+    });
+  });
 }

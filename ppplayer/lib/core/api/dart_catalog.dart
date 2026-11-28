@@ -923,20 +923,39 @@ class DartCatalog {
 
   // -------------------------------------------------------------- lyrics
 
+  /// Same rules as `Catalog.lyrics` (Kotlin, Android phone and watch):
+  /// YouTube tags stripped from the title, " - Topic" from the channel, and
+  /// LRCLIB's best search hit when the exact match misses.
   Future<Json> lyrics(String title, String artist) async {
-    final uri = Uri.https('lrclib.net', '/api/get', {
-      'track_name': title,
-      'artist_name': artist,
-    });
-    final response = await _http
-        .get(uri, headers: {'User-Agent': 'Ultratube/0.2.0'})
+    final query = {'track_name': lyricsTitle(title), 'artist_name': artistName(artist)};
+    const headers = {'User-Agent': 'Ultratube/1.0'};
+    final exact = await _http
+        .get(Uri.https('lrclib.net', '/api/get', query), headers: headers)
         .timeout(const Duration(seconds: 30));
-    if (response.statusCode == 404) return {'plainLyrics': 'Letra não encontrada'};
-    if (response.statusCode != 200) {
-      throw StateError('Não foi possível carregar a letra (${response.statusCode})');
+    if (exact.statusCode == 200) return await InnerTube.decodeJson(exact.bodyBytes);
+    if (exact.statusCode != 404) {
+      throw StateError('Não foi possível carregar a letra (${exact.statusCode})');
     }
-    return await InnerTube.decodeJson(response.bodyBytes);
+    final search = await _http
+        .get(Uri.https('lrclib.net', '/api/search', query), headers: headers)
+        .timeout(const Duration(seconds: 30));
+    if (search.statusCode == 200) {
+      final hits = jsonDecode(utf8.decode(search.bodyBytes));
+      if (hits is List && hits.isNotEmpty) return Map<String, dynamic>.from(hits.first as Map);
+    }
+    return {'plainLyrics': 'Letra não encontrada para esta faixa.'};
   }
+
+  /// "Song (Official Music Video) [4K]" → "Song".
+  static String lyricsTitle(String title) => title
+      .replaceAll(
+        RegExp(
+          r'\s*[(\[][^)\]]*(official|video|lyric|letra|audio|áudio|clipe|visualizer|4k|hd)[^)\]]*[)\]]',
+          caseSensitive: false,
+        ),
+        '',
+      )
+      .trim();
 }
 
 enum _Kind { list, comments }

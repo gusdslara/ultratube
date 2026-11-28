@@ -86,6 +86,7 @@ class FakeNativeAdapter implements INativePlayerAdapter {
     bool play = false,
     Map<String, String>? httpHeaders,
     String? audioUri,
+    bool video = true,
   }) async {
     opens++;
     if (openCompleter != null) await openCompleter!.future;
@@ -209,6 +210,49 @@ void main() {
       sourceType: PlaybackSourceType.local,
     );
 
+    test('a pause nobody asked for is not published; playback is resumed', () async {
+      await engine.play(localTrack);
+      final adapter = adapters.last;
+      adapter._playingCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.currentStatus.state, PlaybackState.playing);
+      final plays = adapter.plays;
+
+      adapter._playingCtrl.add(false);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.currentStatus.state, PlaybackState.playing);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(adapter.plays, plays + 1);
+    });
+
+    test('the pause at the end of a file goes straight to ended', () async {
+      await engine.play(localTrack);
+      final adapter = adapters.last;
+      adapter._playingCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      final plays = adapter.plays;
+
+      // mpv (keep-open) pauses, then reports the end.
+      adapter._playingCtrl.add(false);
+      adapter._completedCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(statuses.map((s) => s.state), isNot(contains(PlaybackState.paused)));
+      expect(engine.currentStatus.state, PlaybackState.ended);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(adapter.plays, plays);
+    });
+
+    test('a requested pause is still published', () async {
+      await engine.play(localTrack);
+      final adapter = adapters.last;
+      adapter._playingCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      await engine.pause();
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(engine.currentStatus.state, PlaybackState.paused);
+      expect(adapter.plays, 1);
+    });
+
     testWidgets('live: rejected seek and socket hiccups do not fail playback', (
       tester,
     ) async {
@@ -230,6 +274,56 @@ void main() {
       await tester.pump();
       expect(engine.currentStatus.state, isNot(PlaybackState.error));
       expect(engine.currentStatus.track?.liveStatus, PlaybackLiveStatus.live);
+      // ffmpeg reconnected: playback keeps advancing past the check.
+      adapters.last._positionCtrl.add(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 11));
+      expect(engine.currentStatus.state, isNot(PlaybackState.error));
+    });
+
+    testWidgets('VOD: a socket error is fatal only if playback then stalls', (
+      tester,
+    ) async {
+      const vod = PlaybackTrack(
+        id: 'abcdefghijk',
+        title: 'Video',
+        networkMediaUri: 'https://example.com/videoplayback',
+        sourceType: PlaybackSourceType.networkStream,
+      );
+      await engine.play(vod);
+      await tester.pump();
+      adapters.last._positionCtrl.add(const Duration(seconds: 40));
+      await tester.pump();
+      // Hardware decoder before the surface exists, a dropped socket after
+      // unlock: mpv recovers from both on its own.
+      adapters.last._errorCtrl.add('h264_mediacodec: Both surface and native_window are NULL');
+      adapters.last._errorCtrl.add('tcp: ffurl_read returned 0xffffff92');
+      await tester.pump(const Duration(seconds: 5));
+      expect(engine.currentStatus.state, isNot(PlaybackState.error));
+      adapters.last._positionCtrl.add(const Duration(seconds: 44));
+      await tester.pump(const Duration(seconds: 6));
+      expect(engine.currentStatus.state, isNot(PlaybackState.error));
+      // This time the connection does not come back.
+      adapters.last._errorCtrl.add('tcp: ffurl_read returned 0xffffff92');
+      await tester.pump(const Duration(seconds: 11));
+      expect(engine.currentStatus.state, PlaybackState.error);
+      expect(engine.currentStatus.error, 'error:connection_lost');
+    });
+
+    testWidgets('VOD: a 403 still fails at once', (tester) async {
+      const vod = PlaybackTrack(
+        id: 'abcdefghijk',
+        title: 'Video',
+        networkMediaUri: 'https://example.com/videoplayback',
+        sourceType: PlaybackSourceType.networkStream,
+      );
+      await engine.play(vod);
+      await tester.pump();
+      adapters.last._positionCtrl.add(const Duration(seconds: 3));
+      await tester.pump();
+      adapters.last._errorCtrl.add('HTTP error 403 Forbidden');
+      await tester.pump();
+      expect(engine.currentStatus.state, PlaybackState.error);
+      expect(engine.currentStatus.error, 'error:forbidden');
     });
 
     testWidgets('backward seek during startup still confirms playback', (

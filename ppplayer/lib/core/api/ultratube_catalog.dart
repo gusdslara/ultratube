@@ -34,11 +34,16 @@ class UltratubeCatalog {
         Map<String, dynamic>.from(await _call(method, args) as Map),
       );
 
+  /// Video ids known to be Shorts. They resolve through the quicker app
+  /// client first (one request instead of a full watch-page extraction).
+  static final fastIds = <String>{};
+
   /// Playable URLs. Video mode may return a separate `audio` track.
   Future<Map<String, dynamic>> resolve(
     String videoId, {
     required bool video,
     int maxHeight = 1080,
+    String audio = 'normal',
   }) async {
     if (!RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(videoId)) {
       throw ArgumentError('ID de vídeo inválido');
@@ -48,6 +53,8 @@ class UltratubeCatalog {
             'url': 'https://www.youtube.com/watch?v=$videoId',
             'video': video,
             'maxHeight': maxHeight,
+            'fast': fastIds.contains(videoId),
+            'audio': audio,
           })
           as Map,
     );
@@ -74,6 +81,13 @@ class UltratubeCatalog {
   ];
 
   Future<YtPage> kiosk(String id) => _page('kiosk', {'id': id});
+
+  /// LRCLIB lyrics (`syncedLyrics`/`plainLyrics`/`instrumental`), with the
+  /// same title clean-up on the phone, the watch and iOS.
+  Future<Map<String, dynamic>> lyrics(String title, String artist) async =>
+      Map<String, dynamic>.from(
+        await _call('lyrics', {'title': title, 'artist': artist}) as Map,
+      );
 
   /// Newest uploads of [channels] (channel URLs), merged newest first.
   Future<YtPage> feed(List<String> channels) =>

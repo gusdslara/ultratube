@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding, AppLifecycleState;
 import 'package:media_kit/media_kit.dart' hide Track;
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -46,11 +47,14 @@ abstract class INativePlayerAdapter {
   /// that do not render video (e.g. audio-only test fakes).
   VideoController? get videoController;
 
+  /// [video]: false for audio-only network media (no video track is
+  /// decoded or read, and the read-ahead cache is sized for audio).
   Future<void> open(
     String uri, {
     bool play = false,
     Map<String, String>? httpHeaders,
     String? audioUri,
+    bool video = true,
   });
   Future<void> play();
   Future<void> pause();
@@ -72,21 +76,70 @@ abstract class INativePlayerAdapter {
   Future<void> dispose();
 }
 
+/// The shared [Player], with media_kit_video's surface refresh made gapless.
+///
+/// Every time Android hands the video a new surface (unlocking the phone,
+/// returning to the app, a video of another size), media_kit_video rebuilds
+/// the video output and then calls `player.seek(currentPosition)` so a frame
+/// is drawn. During playback that seek flushes the audio too: sound cuts for
+/// a moment and resumes — on a network stream after re-buffering. While
+/// playing, re-selecting the video track is enough: the decoder restarts on
+/// the new surface and the audio is never touched. Paused, the seek is kept
+/// (it is what draws the still frame, and there is nothing to interrupt).
+class _SurfacePlayer extends Player {
+  _SurfacePlayer({super.configuration});
+
+  /// Seek asked for by the engine (the viewer, a resume position, …).
+  Future<void> seekTo(Duration position) => super.seek(position);
+
+  /// Reached only by media_kit_video's surface listener.
+  @override
+  Future<void> seek(Duration duration) async {
+    if (!state.playing || state.completed) return super.seek(duration);
+    try {
+      final mpv = platform as dynamic;
+      if (!MediaKitPlayerAdapter._pictureWanted) {
+        // The listener switches the picture back on with the surface.
+        if (MediaKitPlayerAdapter._videoSuspended) {
+          await mpv.setProperty('vid', 'no');
+        }
+        return;
+      }
+      final wid = await mpv.getProperty('wid') as String;
+      if (wid.isEmpty || wid == '0') return; // surface gone: nothing to draw on
+      await mpv.setProperty('vid', 'no');
+      await mpv.setProperty('vid', 'auto');
+    } catch (e) {
+      debugPrint('MediaKitPlaybackEngine: surface refresh failed: $e');
+    }
+  }
+}
+
 /// Production adapter wrapping a real [media_kit] [Player].
 class MediaKitPlayerAdapter implements INativePlayerAdapter {
-  static Player? _sharedPlayer;
+  static _SurfacePlayer? _sharedPlayer;
   static VideoController? _sharedVideoController;
 
   MediaKitPlayerAdapter() {
-    _sharedPlayer ??= Player(
-      configuration: const PlayerConfiguration(logLevel: MPVLogLevel.debug),
+    // mpv's debug log is hundreds of lines per second while a video plays;
+    // formatting and printing each one keeps a CPU core busy for nothing.
+    // Release builds only hear about warnings and errors.
+    _sharedPlayer ??= _SurfacePlayer(
+      configuration: const PlayerConfiguration(
+        logLevel: kDebugMode ? MPVLogLevel.debug : MPVLogLevel.warn,
+      ),
     );
-    _sharedVideoController ??= VideoController(_sharedPlayer!);
+    _sharedVideoController ??= VideoController(
+      _sharedPlayer!,
+      configuration: _directSurface
+          ? const VideoControllerConfiguration(vo: 'mediacodec_embed', hwdec: 'mediacodec')
+          : const VideoControllerConfiguration(),
+    );
     _player = _sharedPlayer!;
     _videoController = _sharedVideoController!;
     _logSubscription = _player.stream.log.listen(
       (event) =>
-          print('MPV_LOG: ${event.level} - ${event.prefix}: ${event.text}'),
+          debugPrint('MPV_LOG: ${event.level} - ${event.prefix}: ${event.text}'),
     );
     try {
       // Enable ffmpeg HTTPS reconnects to prevent EOF/partial file when seeking
@@ -94,23 +147,61 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
         'stream-lavf-o',
         'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,reconnect_on_network_error=1,reconnect_on_http_error=5xx',
       );
-      // Keep some cache around
+      // Read-ahead; resized per item in open() (audio vs video).
       (_player.platform as dynamic).setProperty('cache-secs', '100');
-      // Increase demuxer cache to prevent stalling when skipping fragments
       (_player.platform as dynamic).setProperty(
         'demuxer-max-bytes',
-        '150000000',
-      ); // 150MB
+        '64000000',
+      );
       (_player.platform as dynamic).setProperty(
         'demuxer-max-back-bytes',
-        '50000000',
-      ); // 50MB
+        '16000000',
+      );
     } catch (e) {
       debugPrint('MediaKitPlaybackEngine: Failed to set mpv properties: $e');
     }
   }
 
-  late final Player _player;
+  /// Android: let the hardware decoder draw straight onto the video surface.
+  /// media_kit's default (`vo=gpu`) cannot hand the decoder a surface, so mpv
+  /// falls back to `mediacodec-copy`: every decoded frame is copied to main
+  /// memory and uploaded to the GPU again, which on a 1080p60 Short keeps
+  /// most of a CPU core busy and is what heats the phone.
+  static bool get _directSurface => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  static bool _renderPathReported = false;
+
+  /// One line per app run with how mpv decodes and draws (hardware decoder,
+  /// scalers, frame timing): what decides the phone's CPU/GPU load.
+  void _reportRenderPath() {
+    if (_renderPathReported || kIsWeb) return;
+    _renderPathReported = true;
+    Future<void>.delayed(const Duration(seconds: 6), () async {
+      try {
+        final mpv = _player.platform as dynamic;
+        final values = <String>[];
+        for (final name in const [
+          'mpv-version', 'hwdec', 'hwdec-current', 'current-vo', 'gpu-api', 'video-codec',
+          'video-params/pixelformat', 'video-params/w', 'video-params/h', 'container-fps',
+          'display-fps', 'video-sync', 'scale', 'dscale', 'cscale', 'dither-depth', 'deband',
+          'interpolation', 'frame-drop-count', 'vo-delayed-frame-count',
+        ]) {
+          String value;
+          try {
+            value = await mpv.getProperty(name) as String;
+          } catch (_) {
+            value = '?';
+          }
+          values.add('$name=$value');
+        }
+        debugPrint('MediaKitPlaybackEngine: render path: ${values.join(' ')}');
+      } catch (error) {
+        debugPrint('MediaKitPlaybackEngine: render path unavailable: $error');
+      }
+    });
+  }
+
+  late final _SurfacePlayer _player;
   late final VideoController _videoController;
   StreamSubscription<PlayerLog>? _logSubscription;
   bool _disposed = false;
@@ -156,12 +247,51 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
     }
   }
 
+  /// The current item is a network video whose picture may be dropped
+  /// while the app is in the background (see [suspendVideo]).
+  static bool _networkVideo = false;
+  static bool _videoSuspended = false;
+
+  /// The current item is opened with a picture (not audio-only).
+  static bool _hasPicture = true;
+  static bool get _pictureWanted => _hasPicture && !_videoSuspended;
+
+  /// Nothing of the app on screen: stopped activity, or the engine was
+  /// started by the media service with no activity at all. (A floating
+  /// window keeps the activity resumed/inactive, so PiP is not "no screen".)
+  static bool _noScreen() {
+    if (MediaKitPlaybackEngine.isActivityStopped) return true;
+    if (kIsWeb || !Platform.isAndroid) return false;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return lifecycle == null ||
+        lifecycle == AppLifecycleState.detached ||
+        lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.paused;
+  }
+
+  /// Background without a floating window: nobody sees the picture, so mpv
+  /// stops decoding the video track — and, with no track selected on the
+  /// video-only stream, stops downloading it. Audio keeps playing; the
+  /// picture comes back (from the current position) when [suspend] is false.
+  static Future<void> suspendVideo(bool suspend) async {
+    final player = _sharedPlayer;
+    if (kIsWeb || player == null || _videoSuspended == suspend) return;
+    if (suspend && !_networkVideo) return;
+    _videoSuspended = suspend;
+    try {
+      await (player.platform as dynamic).setProperty('vid', suspend ? 'no' : 'auto');
+    } catch (e) {
+      debugPrint('MediaKitPlaybackEngine: vid toggle failed: $e');
+    }
+  }
+
   @override
   Future<void> open(
     String uri, {
     bool play = false,
     Map<String, String>? httpHeaders,
     String? audioUri,
+    bool video = true,
   }) async {
     await (_cacheReady ??= _configureCacheDirectory());
     if (!kIsWeb) {
@@ -188,18 +318,46 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
         'hr-seek',
         local ? 'yes' : 'no',
       );
-      // HLS segments often come without a length (chunked); with
-      // reconnect_streamed ffmpeg mistakes each segment's normal end for a
-      // drop and backs off 0/1/3 s, stalling lives every few seconds.
+      // HLS segments often come without a length (chunked; Twitch's CDN
+      // also advertises Accept-Ranges). The ffmpeg in libmpv treats such a
+      // segment's normal end as a premature EOF whenever `reconnect` is on:
+      // it logs "Will reconnect at <size> … End of file", backs off 0/1/3 s
+      // and gets 416 for the Range request, so a live with 2 s segments
+      // stalls every few seconds. The HLS demuxer already retries segments
+      // and playlists by itself, so plain HTTP reconnects stay off here;
+      // reconnect_on_network_error still covers failed connects.
       final hls = uri.contains('.m3u8') ||
           uri.contains('/api/manifest/hls_') ||
           uri.startsWith('http://127.0.0.1:');
       await (_player.platform as dynamic).setProperty(
         'stream-lavf-o',
         hls
-            ? 'reconnect=1,reconnect_delay_max=2,reconnect_on_network_error=1'
+            ? 'reconnect=0,reconnect_on_network_error=1,reconnect_delay_max=2'
             : 'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,reconnect_on_network_error=1,reconnect_on_http_error=5xx',
       );
+      // Audio-only network media: no video track at all (a stray cover-art
+      // or video stream is neither read nor decoded) and a cache sized for
+      // ~128 kbps — two minutes of read-ahead is about 2 MB. Video keeps a
+      // minute ahead: enough to ride out a weak signal without downloading
+      // (and paying for) minutes that a skip throws away.
+      final audioOnly = !local && !video;
+      _networkVideo = !local && video;
+      _hasPicture = !audioOnly;
+      // Opened with nothing on screen (locked phone, app in the
+      // background without PiP — e.g. "next" from a watch): no surface to
+      // draw on, and asking mpv for a picture there made the open hang
+      // until its timeout. Start without it; it returns with the screen.
+      if (_networkVideo && _noScreen()) _videoSuspended = true;
+      final mpv = _player.platform as dynamic;
+      await mpv.setProperty('vid', audioOnly || (_videoSuspended && _networkVideo) ? 'no' : 'auto');
+      if (!_networkVideo) _videoSuspended = false;
+      if (!local) {
+        await mpv.setProperty('cache-secs', audioOnly ? '120' : '60');
+        await mpv.setProperty('demuxer-max-bytes', audioOnly ? '16000000' : '64000000');
+        await mpv.setProperty('demuxer-max-back-bytes', audioOnly ? '8000000' : '16000000');
+      } else {
+        await mpv.setProperty('cache-secs', '100');
+      }
     }
     // Bug fix: do NOT inject HTTP headers for local-scheme URIs (file://, content://,
     // asset://). libmpv ignores them for local sources, but on Android passing a header
@@ -220,6 +378,7 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
       }
     }
     _currentMedia = Media(uri, httpHeaders: headers.isEmpty ? null : headers);
+    _reportRenderPath();
     return _player.open(_currentMedia!, play: play);
   }
 
@@ -230,7 +389,7 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
   @override
   Future<void> stop() => _player.stop();
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) => _player.seekTo(position);
   @override
   Future<void> setVolume(double volume100) => _player.setVolume(volume100);
   @override
@@ -325,12 +484,22 @@ class NativePlaybackSession {
   final List<StreamSubscription<dynamic>> subscriptions = [];
   bool _torn = false;
 
+  /// Pending check for a non-fatal mpv error line (see `_softError`).
+  Timer? softErrorTimer;
+
+  /// What the native player last reported, and the pending check for a
+  /// pause nobody asked for (see `_unrequestedPause`).
+  bool nativePlaying = false;
+  Timer? unrequestedPauseTimer;
+
   VideoController? get videoController => adapter.videoController;
 
   /// Cancel subscriptions and dispose the adapter exactly once (idempotent).
   Future<void> tear() async {
     if (_torn) return;
     _torn = true;
+    softErrorTimer?.cancel();
+    unrequestedPauseTimer?.cancel();
     for (final sub in subscriptions) {
       sub.cancel();
     }
@@ -443,6 +612,10 @@ class MediaKitPlaybackEngine implements PlaybackController {
   /// Each closure captures [session] by reference. If [session] is no longer
   /// [_activeSession] when the event fires the update is dropped with a single
   /// identity check — no URI comparison, no extras, no readiness flag.
+  static const _positionInterval = Duration(milliseconds: 200);
+  DateTime _lastPositionEmit = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration _lastEmittedPosition = Duration.zero;
+
   void _bindSession(NativePlaybackSession session) {
     final a = session.adapter;
     session.subscriptions.addAll([
@@ -455,12 +628,25 @@ class MediaKitPlaybackEngine implements PlaybackController {
           session.hasPlaybackProgress = true;
           _watchdogTimer?.cancel();
         }
-        _updateStatus(
-          _currentStatus.copyWith(
-            position: pos,
-            isLive: _currentStatus.track?.liveStatus == PlaybackLiveStatus.live,
-          ),
+        final next = _currentStatus.copyWith(
+          position: pos,
+          isLive: _currentStatus.track?.liveStatus == PlaybackLiveStatus.live,
         );
+        // mpv reports the position on every frame (up to 60 times a second
+        // with video); each report rebuilt the player state and everything
+        // listening to it. ~5 a second is plenty for any timeline; a seek
+        // or the first report after a (re)start still goes out at once.
+        // Skipped reports still land in _currentStatus, so the next status
+        // (pause, end, …) carries the exact position.
+        final now = DateTime.now();
+        final jumped = (pos - _lastEmittedPosition).abs() >= const Duration(seconds: 1);
+        if (jumped || now.difference(_lastPositionEmit) >= _positionInterval) {
+          _lastPositionEmit = now;
+          _lastEmittedPosition = pos;
+          _updateStatus(next);
+        } else {
+          _currentStatus = next.copyWith(generation: _playGeneration);
+        }
       }),
       a.durationStream.listen((dur) {
         if (session != _activeSession || _disposed) return;
@@ -486,8 +672,13 @@ class MediaKitPlaybackEngine implements PlaybackController {
       }),
       a.playingStream.listen((playing) {
         if (session != _activeSession || _disposed) return;
+        session.nativePlaying = playing;
         // Don't overwrite preparing — wait for buffering/playing stream events.
         if (_currentStatus.state == PlaybackState.preparing) return;
+        if (!playing && _intendedState == PlaybackState.playing) {
+          _unrequestedPause(session);
+          return;
+        }
         _updateStatus(
           _currentStatus.copyWith(
             state: playing ? PlaybackState.playing : PlaybackState.paused,
@@ -498,20 +689,23 @@ class MediaKitPlaybackEngine implements PlaybackController {
         print('MediaKitPlaybackEngine: [ERROR] $err');
         if (session != _activeSession || _disposed) return;
         final errStr = err.toLowerCase();
-        // media_kit reports every mpv error-level log line here, including
-        // transient socket errors that ffmpeg recovers from on its own
-        // ("tcp: ffurl_read returned …", then "Will reconnect"). For a live
-        // that is already playing these only mean a short rebuffer; failing
-        // the track would drop the broadcast.
-        final live = _currentStatus.track?.liveStatus == PlaybackLiveStatus.live;
-        final transient = RegExp(r'^(tcp|tls|https?|ffmpeg|hls)\b|ffurl_read|i/o error|timed out|connection reset|end of file').hasMatch(errStr) &&
-            !errStr.contains('403') &&
-            !errStr.contains('404');
-        if (live && session.hasPlaybackProgress && transient) return;
         // A rejected seek (live/non-seekable stream; media_kit also seeks to
         // refresh the picture when the surface is re-created) leaves the
         // media playing. It is never a playback failure.
         if (errStr.contains('cannot seek') || errStr.contains('force-seekable')) return;
+        // media_kit reports every mpv error-level log line here (prefixes
+        // tcp/vd/ad/cplayer/stream), most of which mpv survives on its own:
+        // a dropped socket after the screen was locked ("tcp: ffurl_read
+        // returned …", then ffmpeg reconnects), one address of a dual-stack
+        // host refusing, the hardware decoder failing before the video
+        // surface exists and mpv falling back to software. Only a clear
+        // HTTP/open failure ends the attempt at once; anything else fails it
+        // only if playback then stops making progress.
+        final hard = RegExp(r'\b(403|404|410)\b|forbidden|not found|failed to open|failed to recognize').hasMatch(errStr);
+        if (!hard) {
+          _softError(session, err);
+          return;
+        }
         String errorCode = 'error:playback_failed';
         if (errStr.contains('403') || errStr.contains('forbidden')) {
           errorCode = 'error:forbidden';
@@ -538,6 +732,24 @@ class MediaKitPlaybackEngine implements PlaybackController {
         if (!completed) return;
         if (session != _activeSession || _disposed) return;
         _watchdogTimer?.cancel();
+        // When ffmpeg gives up on a dropped connection mpv reports EOF at the
+        // point the download stopped. A network VOD "ending" well before its
+        // length is a failure the owner can resume, not the end of the track.
+        final track = _currentStatus.track;
+        final length = _currentStatus.duration > Duration.zero
+            ? _currentStatus.duration
+            : (track?.duration ?? Duration.zero);
+        if (track != null &&
+            !track.isLocal &&
+            track.liveStatus != PlaybackLiveStatus.live &&
+            length > Duration.zero &&
+            _currentStatus.position < length - const Duration(seconds: 5)) {
+          print('MediaKitPlaybackEngine: early EOF at ${_currentStatus.position} of $length');
+          _updateStatus(
+            _currentStatus.copyWith(state: PlaybackState.error, error: 'error:connection_lost'),
+          );
+          return;
+        }
         _updateStatus(_currentStatus.copyWith(state: PlaybackState.ended));
       }),
       a.bufferingStream.listen((buffering) {
@@ -547,6 +759,10 @@ class MediaKitPlaybackEngine implements PlaybackController {
         if (_currentStatus.state == PlaybackState.preparing && !buffering) {
           return;
         }
+        // A socket that died silently (screen locked, Wi-Fi handover) shows
+        // up only as endless buffering; give the network time, then fail so
+        // the owner can re-open the stream where it stopped.
+        if (buffering) _softError(session, 'buffering', wait: const Duration(seconds: 25));
         _updateStatus(
           _currentStatus.copyWith(
             state:
@@ -686,6 +902,7 @@ class MediaKitPlaybackEngine implements PlaybackController {
               play: false,
               httpHeaders: track.httpHeaders,
               audioUri: track.externalAudioUri,
+              video: track.isVideo,
             )
             .timeout(const Duration(seconds: 10));
         if (_disposed || _activeSession != session) return;
@@ -830,6 +1047,7 @@ class MediaKitPlaybackEngine implements PlaybackController {
               play: false,
               httpHeaders: track.httpHeaders,
               audioUri: track.externalAudioUri,
+              video: track.isVideo,
             )
             .timeout(const Duration(seconds: 10));
         if (_disposed || _activeSession != session) return;
@@ -1027,6 +1245,54 @@ class MediaKitPlaybackEngine implements PlaybackController {
   // ---------------------------------------------------------------------------
   // Status update + IFrame position polling
   // ---------------------------------------------------------------------------
+
+  /// A non-fatal mpv error line: fail the attempt only if playback that had
+  /// started stops advancing. Startup stalls stay with the play watchdog, and
+  /// a paused player has nothing to verify.
+  void _softError(
+    NativePlaybackSession session,
+    String err, {
+    Duration wait = const Duration(seconds: 10),
+  }) {
+    if (!session.hasPlaybackProgress || session.softErrorTimer?.isActive == true) {
+      return;
+    }
+    final generation = session.generation;
+    final baseline = _currentStatus.position;
+    session.softErrorTimer = Timer(wait, () {
+      if (_disposed || _activeSession != session) return;
+      if (_intendedState != PlaybackState.playing) return;
+      if (_currentStatus.position > baseline + const Duration(milliseconds: 500)) {
+        return; // mpv recovered (reconnect, software decoding, …)
+      }
+      print('MediaKitPlaybackEngine: stalled after "$err"');
+      _failAttempt(generation, 'error:connection_lost');
+    });
+  }
+
+  /// The native player paused while playback is wanted. mpv does that by
+  /// itself at the end of a file (`keep-open`), right before reporting the
+  /// end: publishing "paused" there told the system the music had stopped
+  /// between two queue items, and Android dropped the media foreground
+  /// service — with the screen locked, the next item then never started.
+  /// So it is not published. Should the pause be anything else (a late
+  /// command from the previous item, a surface change), playback is asked
+  /// for again instead of staying silently stopped.
+  void _unrequestedPause(NativePlaybackSession session) {
+    session.unrequestedPauseTimer?.cancel();
+    session.unrequestedPauseTimer = Timer(const Duration(milliseconds: 700), () {
+      if (_disposed || _activeSession != session) return;
+      if (_intendedState != PlaybackState.playing || session.nativePlaying) return;
+      final state = _currentStatus.state;
+      if (state == PlaybackState.ended ||
+          state == PlaybackState.error ||
+          state == PlaybackState.idle) {
+        return;
+      }
+      debugPrint('MediaKitPlaybackEngine: paused without a request; resuming');
+      unawaited(session.adapter.play());
+    });
+  }
 
   void _failAttempt(int generation, String error) {
     if (!_valid(generation)) return;

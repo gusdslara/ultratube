@@ -14,7 +14,9 @@ import '../playback/playback_providers.dart';
 import '../playback/pip_handler.dart';
 import '../api/spotify_repository.dart';
 import '../api/ultratube_catalog.dart';
-import '../playback/ultratube_playback_controller.dart' show UltratubeResolveCache;
+import '../playback/ultratube_playback_controller.dart'
+    show UltratubeResolveCache, isTransientResolveError;
+import 'package:flutter/services.dart' show PlatformException;
 import '../ultratube/ultratube_store.dart';
 import '../services/settings_provider.dart';
 import '../network_streams/network_stream_service.dart';
@@ -139,7 +141,29 @@ class PlayerNotifier extends Notifier<PlayerState> {
   // duplicate ended emissions don't skip twice, while a genuinely new (even very
   // short) track that ends right after still advances.
   String? _lastAdvancedEndedKey;
+  bool _lastEndedContinues = false;
+
+  /// Something plays after the current item ends: another queue item,
+  /// repeat/shuffle, or YouTube's "up next" when autoplay is on.
+  bool _continuesAfterCurrent() {
+    final q = state.playbackQueue;
+    final current = q.currentTrack;
+    if (current == null) return false;
+    if (q.repeatMode != RepeatMode.none) return true;
+    if (q.isShuffled && q.tracks.length > 1) return true;
+    if (q.currentIndex + 1 < q.tracks.length) return true;
+    return current.spotifyId.startsWith('youtube:') &&
+        ref.read(ultratubeAutoplayProvider);
+  }
+
+  /// Whether the `ended` [status] is followed by another item. Safe to ask
+  /// before or after this notifier advanced the queue for that same event.
+  bool continuesAfterEnded(PlaybackStatus status) =>
+      _lastAdvancedEndedKey == '${status.generation}:${status.track?.id}'
+      ? _lastEndedContinues
+      : _continuesAfterCurrent();
   bool _lastPipEnabled = false;
+  double? _lastPipAspect;
   Timer? _saveTimer;
   bool _disposed = false;
   Future<void> _persistenceWork = Future.value();
@@ -186,6 +210,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         if (status.state == PlaybackState.ended) {
           final endedKey = '${status.generation}:${status.track?.id}';
           if (_lastAdvancedEndedKey != endedKey) {
+            _lastEndedContinues = _continuesAfterCurrent();
             _lastAdvancedEndedKey = endedKey;
             skipNext();
           }
@@ -195,7 +220,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
     });
 
     PipHandler.addPipModeListener((isPipMode) {
-      state = state.copyWith(isPipMode: isPipMode);
+      // Android's answer settles the request either way. Leaving the flag
+      // set after a successful entry kept the whole interface hidden (video
+      // only) once the viewer came back from the floating window.
+      state = state.copyWith(isPipMode: isPipMode, isPipRequestPending: false);
     });
 
     PipHandler.addPipEntryRequestedListener(() {
@@ -289,6 +317,17 @@ class PlayerNotifier extends Notifier<PlayerState> {
         return;
       }
 
+      // Ultratube already re-extracted and retried this stream; the network
+      // is really down. Skipping ahead would only fail the next items too:
+      // stop here and let the viewer retry.
+      if (status.error == 'error:connection_lost') {
+        state = state.copyWith(
+          loadError: status.error,
+          isLoadingVideo: false,
+          isPlaying: false,
+        );
+        return;
+      }
       if (status.error!.startsWith('unavailable_media:') ||
           status.error!.startsWith('error:')) {
         _handleCandidateFailure();
@@ -356,11 +395,22 @@ class PlayerNotifier extends Notifier<PlayerState> {
     // requires this to be done only when the activity is foregrounded, we just pass it when wantPip changes.
     // If we are currently playing a video and the aspect ratio changes, we might want to update it.
     // Let's just pass the current aspect ratio.
-    if (wantPip != _lastPipEnabled) {
+    // The window takes the shape of the video playing when the app is left:
+    // a new video (a vertical Short after a regular one) updates it too, but
+    // only while the app is in front (Android refuses it otherwise).
+    final pipAspect = status.videoAspectRatio;
+    final aspectChanged = wantPip &&
+        pipAspect != null &&
+        pipAspect > 0 &&
+        (_lastPipAspect == null || (pipAspect - _lastPipAspect!).abs() > 0.01) &&
+        !PipHandler.isInPipMode &&
+        !PipHandler.isActivityStopped;
+    if (wantPip != _lastPipEnabled || aspectChanged) {
       _lastPipEnabled = wantPip;
+      if (pipAspect != null && pipAspect > 0) _lastPipAspect = pipAspect;
       PipHandler.setPipEnabled(
         wantPip,
-        aspectRatio: status.videoAspectRatio ?? (16 / 9),
+        aspectRatio: pipAspect ?? (16 / 9),
       );
     }
 
@@ -398,6 +448,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       );
       _restoringState = false;
       _restoreTimeout?.cancel();
+      _runDeferredResume();
     }
 
     // Trigger prefetch once playback starts successfully
@@ -417,10 +468,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final ytId = nextTrack.youtubeVideoId;
       if (ytId != null && nextTrack.spotifyId.contains(':')) {
         // Resolve the next stream ahead of time so "up next" starts instantly.
+        final profile = readStreamProfile(ref.read);
         UltratubeResolveCache.warm(
           ytId,
           video: ref.read(settingsProvider).showVideo,
-          maxHeight: ref.read(videoQualityProvider),
+          maxHeight: profile.maxHeight,
+          audio: profile.audio,
         );
         return;
       }
@@ -614,7 +667,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   Future<void> _prepareRestoredTrack(Duration savedPosition) async {
     final track = state.currentTrack;
     if (track == null) {
-      _restoringState = false;
+      _clearRestoreGuard();
       return;
     }
 
@@ -633,7 +686,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         }
 
         if (candidates.isEmpty) {
-          _restoringState = false;
+          _clearRestoreGuard();
           return;
         }
 
@@ -687,6 +740,16 @@ class PlayerNotifier extends Notifier<PlayerState> {
     }
     _restoreTimeout?.cancel();
     _restoreTimeout = null;
+    _runDeferredResume();
+  }
+
+  /// A play request that came in during the startup restore.
+  bool _resumeAfterRestore = false;
+
+  void _runDeferredResume() {
+    if (!_resumeAfterRestore || _restoringState || _disposed) return;
+    _resumeAfterRestore = false;
+    unawaited(resume());
   }
 
   PlaybackController get _controller => ref.read(playbackControllerProvider);
@@ -862,7 +925,24 @@ class PlayerNotifier extends Notifier<PlayerState> {
       debugPrint('Failed to resolve track ${targetTrack.name}: $e');
       await _controller.stop();
       if (_disposed || myGen != _playbackGeneration) return;
-      final errorMessage = e.toString().contains('Exception:')
+      // Extraction was already retried below this layer. A network failure
+      // would fail every next item as well, so show it with a retry instead
+      // of skipping through the queue; only content that can never play
+      // ("unavailable": private, removed, age/region) moves on.
+      final catalogFailure = e is PlatformException || e is TimeoutException;
+      if (targetTrack.sourceType == TrackSourceType.online &&
+          catalogFailure &&
+          isTransientResolveError(e)) {
+        state = state.copyWith(
+          loadError: 'error:connection_lost',
+          isLoadingVideo: false,
+          isPlaying: false,
+        );
+        return;
+      }
+      final errorMessage = e is PlatformException
+          ? 'unavailable: ${e.message ?? e.code}'
+          : e.toString().contains('Exception:')
           ? e.toString().split('Exception: ').last
           : 'Failed to resolve track playback URL';
       _handleLogicalTrackFailure(errorMessage);
@@ -1001,7 +1081,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
     // the startup restore is cuing the video. _restoringState is cleared by
     // _prepareRestoredTrack once the IFrame is ready (or on failure).
     if (_restoringState) {
-      debugPrint('PlayerNotifier: resume() blocked — restore in progress');
+      // Not dropped: an explicit play (watch, headset, notification) that
+      // arrives while the saved queue is being restored — typically right
+      // after the system started the app for it — runs once the restore
+      // settles. Before, it was lost and nothing played.
+      debugPrint('PlayerNotifier: resume() deferred — restore in progress');
+      _resumeAfterRestore = true;
       return;
     }
     final engineState = _controller.currentStatus.state;
@@ -1140,6 +1225,52 @@ class PlayerNotifier extends Notifier<PlayerState> {
         queueIndex: index,
       );
     }
+  }
+
+  /// Plays [track] now without throwing the queue away: it goes right after
+  /// the current item and playback jumps to it. What the viewer queued
+  /// ("Tocar em seguida", "Adicionar à fila") stays next; with
+  /// [keepContext] so does the rest of the playlist being played.
+  /// Automatic suggestions for the previous video are dropped (the new one
+  /// brings its own).
+  Future<void> playNow(Track track, {bool keepContext = false}) {
+    final q = state.playbackQueue;
+    if (q.currentTrack == null) return playTrack(track, queue: [track]);
+    const maxHistory = 50;
+    final played = q.tracks.sublist(0, q.currentIndex + 1);
+    final history = [
+      for (final t in played.skip((played.length - maxHistory).clamp(0, played.length)))
+        if (t.spotifyId != track.spotifyId) t,
+    ];
+    final upcoming = [
+      for (final t in q.tracks.skip(q.currentIndex + 1))
+        if (t.spotifyId != track.spotifyId &&
+            (t.queueOrigin == QueueItemOrigin.user ||
+                (keepContext && t.queueOrigin == QueueItemOrigin.context)))
+          t,
+    ];
+    final next = track.copyWith(queueItemId: null);
+    return playTrack(
+      next,
+      queue: [...history, next, ...upcoming],
+      queueIndex: history.length,
+    );
+  }
+
+  /// Appends automatic suggestions ("up next" of the current video). They
+  /// stay behind everything the viewer queued, and only when autoplay is on.
+  void addAutoplayTracks(List<Track> tracks) {
+    if (!ref.read(ultratubeAutoplayProvider)) return;
+    var q = state.playbackQueue;
+    final known = {for (final t in q.tracks) t.spotifyId};
+    for (final track in tracks) {
+      if (!known.add(track.spotifyId)) continue;
+      q = q.add(track.copyWith(queueOrigin: QueueItemOrigin.autoplay));
+    }
+    if (identical(q, state.playbackQueue)) return;
+    _autoplaySeenTrackIds.addAll(tracks.map((t) => t.spotifyId));
+    state = state.copyWith(playbackQueue: q);
+    _scheduleSaveState();
   }
 
   void addToQueue(Track track) {

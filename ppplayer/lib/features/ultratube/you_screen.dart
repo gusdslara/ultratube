@@ -7,12 +7,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api/yt_models.dart';
 import '../../core/downloads/ultratube_downloads.dart';
+import '../../core/services/settings_provider.dart';
 import '../../core/theme/ultratube_theme.dart';
 import '../../core/ultratube/feeds.dart';
 import '../../core/ultratube/ultratube_store.dart';
 import '../../core/ultratube/youtube_account.dart';
 import '../../core/ai/video_assistant.dart';
 import '../live/live_chat_view.dart';
+import 'pip_button.dart';
 import 'playlist_picker.dart';
 import 'yt_widgets.dart';
 
@@ -112,6 +114,13 @@ class YouScreen extends ConsumerWidget {
                   subtitle: 'Traz os canais que você segue na conta',
                   onTap: () => _sync(context, ref),
                 ),
+                if (YoutubeAccountApi.watchLinkSupported)
+                  _Row(
+                    icon: Icons.watch_outlined,
+                    title: 'Conectar relógio',
+                    subtitle: 'Entra com esta conta no Ultratube do Galaxy Watch',
+                    onTap: () => const YoutubeAccountApi().linkWatch(),
+                  ),
                 _Row(icon: Icons.logout, title: 'Sair da conta do YouTube', onTap: () => _signOut(context, ref)),
               ],
               const SizedBox(height: 140),
@@ -166,8 +175,12 @@ class _SettingsSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final quality = ref.watch(videoQualityProvider);
+    final audioQuality = ref.watch(audioQualityProvider);
+    final audioOnly = ref.watch(audioOnlyProvider);
+    final dataSaver = ref.watch(mobileDataSaverProvider);
     final autoplay = ref.watch(ultratubeAutoplayProvider);
     final skip = ref.watch(sponsorSkipProvider);
+    final pip = ref.watch(settingsProvider.select((s) => s.continuePlaybackInPip));
     ref.watch(historyProvider);
     final history = ref.read(historyProvider.notifier);
     return SafeArea(
@@ -194,6 +207,40 @@ class _SettingsSheet extends ConsumerWidget {
               onChanged: (v) => v == null ? null : ref.read(videoQualityProvider.notifier).set(v),
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.graphic_eq),
+            title: const Text('Qualidade do áudio'),
+            subtitle: Text(AudioQualityNotifier.label(audioQuality)),
+            trailing: DropdownButton<String>(
+              value: audioQuality,
+              underline: const SizedBox(),
+              borderRadius: BorderRadius.circular(UT.rMd),
+              dropdownColor: UT.surface2,
+              items: const [
+                DropdownMenuItem(value: 'low', child: Text('Econômica')),
+                DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                DropdownMenuItem(value: 'high', child: Text('Alta')),
+              ],
+              onChanged: (v) => v == null ? null : ref.read(audioQualityProvider.notifier).set(v),
+            ),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.headphones_outlined),
+            title: const Text('Só áudio'),
+            subtitle: const Text('Vídeos tocam sem imagem: só a faixa de áudio é baixada (Shorts continuam com vídeo)'),
+            value: audioOnly,
+            onChanged: (v) {
+              ref.read(audioOnlyProvider.notifier).set(v);
+              ref.read(settingsProvider.notifier).setPlayerView(v ? PlayerView.artwork : PlayerView.video);
+            },
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.signal_cellular_alt),
+            title: const Text('Economia na rede móvel'),
+            subtitle: const Text('Fora do Wi-Fi: vídeo até 480p e áudio econômico'),
+            value: dataSaver,
+            onChanged: ref.read(mobileDataSaverProvider.notifier).set,
+          ),
           SwitchListTile(
             secondary: const Icon(Icons.playlist_play),
             title: const Text('Reprodução automática'),
@@ -201,6 +248,14 @@ class _SettingsSheet extends ConsumerWidget {
             value: autoplay,
             onChanged: ref.read(ultratubeAutoplayProvider.notifier).set,
           ),
+          if (pipSupported)
+            SwitchListTile(
+              secondary: const Icon(Icons.picture_in_picture_alt_outlined),
+              title: const Text('Janela flutuante (PiP)'),
+              subtitle: const Text('Ao sair do app, o vídeo que está tocando continua numa janela sobre as outras'),
+              value: pip,
+              onChanged: ref.read(settingsProvider.notifier).toggleContinuePlaybackInPip,
+            ),
           SwitchListTile(
             secondary: const Icon(Icons.fast_forward_outlined),
             title: const Text('Pular patrocínios'),

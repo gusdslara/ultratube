@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../api/innertube.dart';
+import '../api/reels.dart';
 
 /// Dart port of the Android `YoutubeAccount.kt` for iOS. The Google sign-in
 /// page runs natively (WKWebView, `app.ultratube/ios_login`) and hands back
@@ -168,6 +169,17 @@ class DartYoutubeAccount {
     return out.values.toList();
   }
 
+  /// InnerTube call that also works signed out; the session is sent when
+  /// there is one, which personalises the answer.
+  Future<Json> _open(String endpoint, Json body) async =>
+      hasSession(await _cookies()) ? _call(endpoint, body) : _tube.post(endpoint, body);
+
+  /// YouTube's own Shorts feed (the account's when signed in).
+  Future<Json> shorts(String? token) => Reels(_open).feed(token);
+
+  /// Title, channel and counters of one Short.
+  Future<Json> shortInfo(String videoId) => Reels(_open).info(videoId);
+
   /// The account's own YouTube home ("recommended for you").
   Future<Json> home(String? token) async {
     final page = await _call(
@@ -177,7 +189,8 @@ class DartYoutubeAccount {
           : {'continuation': token},
     );
     return {
-      'items': parseItems(page).where((i) => i['type'] == 'video').toList(),
+      // Shorts shelves included: the home shows them on their own shelf.
+      'items': parseItems(page, shelves: true).where((i) => i['type'] == 'video').toList(),
       'next': continuation(page)?.$1,
     };
   }

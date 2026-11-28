@@ -282,3 +282,209 @@ Ultratube antes de substituir identidade, assinatura, ícones e endpoints de atu
   emotes, badges, contador), legendas para o Perguntar. `flutter analyze`: 0
   erros. Falta validar no S23: reprodução das lives no MediaKit, overlay e
   gestos, e o Perguntar com uma chave real.
+
+### Relógio 0.5 e desktop (18/11/2026)
+
+- **Relógio — fim do "processo invisível"**: a notificação de reprodução agora
+  é uma *Ongoing Activity* do Wear OS (ícone do Ultratube no mostrador enquanto
+  toca, que leva de volta ao player) com Pausar/Próxima/**Parar**. Fechar o app
+  (voltar na tela inicial ou remover dos recentes) para a música e encerra o
+  serviço; sair pela coroa continua tocando, com o ícone para voltar. Pausado
+  e sem nenhuma tela do Ultratube aberta, o serviço se encerra sozinho em 5 min.
+- **Correção Android 16 (Galaxy Watch 7)**: com o voltar preditivo o
+  `onBackPressed` nunca era chamado — o voltar das sub-telas saía do app e
+  fechar não parava nada. Agora usa `OnBackInvokedDispatcher`.
+- **Relógio — Twitch e lives do YouTube**: "Twitch ao vivo" (mais vistas em
+  português + busca de canal) e "Lives do YouTube". Twitch toca em vídeo 360p
+  (segure para só áudio) com o mesmo filtro de anúncios do celular, portado
+  para Kotlin (`android/media/.../Twitch.kt`, servido ao ExoPlayer como
+  playlist gerada). Lives do YouTube tocam uma variante HLS + áudio. O player
+  mostra "● AO VIVO" e alterna vídeo/só áudio também em lives.
+- Validado no Galaxy Watch 7 (Android 16): Twitch em vídeo, 60 s no mostrador
+  continuando a tocar com o ícone, voltar das sub-telas, fechar → serviço e
+  notificação encerrados; live do YouTube em vídeo.
+- **Desktop (Windows, macOS, Linux)**: o shell do Ultratube (feed, Twitch,
+  chat ao vivo, Perguntar, player próprio com MediaKit e catálogo Dart) agora
+  roda no desktop. Janelas largas usam barra lateral (com rótulos a partir de
+  1200 px) e mini player; a tela Assistir limita o player à altura da janela e
+  leva "A seguir" para uma coluna lateral a partir de 1280 px; na Twitch o chat
+  vira coluna à direita. Paisagem só vira tela cheia no celular; no desktop é o
+  botão ou a tecla F (tela cheia real da janela), Espaço pausa, e passar o mouse
+  mostra os controles. Login Google fica só no celular (precisa do WebView nativo).
+- Builds desktop: workflow manual "Ultratube Desktop" (`.github/workflows/
+  ultratube-desktop.yml`) gera Windows x64 (.zip), Linux x64 (.tar.gz) e macOS
+  (.app com assinatura ad-hoc). Compilar Windows localmente exige o Modo de
+  Desenvolvedor do Windows (links simbólicos dos plugins); por isso a interface
+  desktop ainda não foi vista rodando.
+
+### Celular 1.0.4 — Shorts e Início rápidos, conta e voltar (21/11/2026)
+
+- **Voltar fechava o app (Android 16)**: com targetSdk 36 o `onBackPressed` não é
+  mais chamado e o Flutter só registra o `OnBackInvokedCallback` quando o
+  framework avisa que há algo para voltar; esse aviso se perdia e o sistema
+  fechava a activity. `MainActivity` mantém o callback sempre registrado, então
+  o voltar sempre chega ao Flutter. Numa aba que não é o Início, voltar leva ao
+  Início; só no Início ele sai do app (`_TabBack` em `app_router.dart`). A tela
+  de login do Google também passou a usar o dispatcher novo.
+- **Shorts — feed real**: a aba usa o feed de Shorts do próprio YouTube
+  (`reel/reel_item_watch` + `reel/reel_watch_sequence`), personalizado com a
+  conta conectada e regional sem conta; a busca por temas ficou como reserva.
+  Abrir a aba custava 4 buscas com várias páginas; agora são 2 chamadas leves.
+- **Shorts — troca rápida**: os 2 próximos Shorts são preparados enquanto o atual
+  toca (URL resolvida, capa em cache, título e contadores). Shorts resolvem
+  primeiro pelo cliente do app iOS (1 chamada, ~0,45 s contra ~1,2 s da extração
+  completa), com o NewPipe como reserva.
+- **Shorts — comentários e curtidas**: botão de comentários com a contagem real,
+  painel de comentários paginado, curtidas reais no botão (que salva em Curtidos).
+- **Início**: abre na hora com a última página salva (até 10 min sem recarregar;
+  depois mostra a salva e atualiza por trás). Sem conta, cada fonte aparece assim
+  que chega em vez de esperar a mais lenta ("a seguir" do histórico, que exige
+  extração completa, vai por último). Com conta, "Para você" é o Início do
+  YouTube da conta, na ordem do YouTube, com a prateleira de Shorts dela.
+- **Twitch — conta**: entrar pelo código de dispositivo (twitch.tv/activate; a
+  senha nunca passa pelo app). Os canais seguidos na conta entram em "Seguindo"
+  e são sincronizados ao abrir e ao puxar para atualizar. Tokens no keystore.
+- **Twitch — busca e categorias**: sugestões ao digitar, buscas recentes,
+  categorias em alta, resultados com filtros (Tudo, Canais, Categorias, Ao vivo,
+  Vídeos). Categoria com ordenação, gêneros e aba de vídeos; aba Categorias com
+  filtro por gênero; prateleira de categorias em "Ao vivo agora".
+- Verificado: `flutter analyze` sem erros; testes novos de Dart (feed de Shorts,
+  API da Twitch) e de Kotlin (parser de Shorts contra respostas reais do
+  YouTube); APIs conferidas contra os serviços reais (`tool/reels_probe.dart`,
+  `tool/twitch_probe.dart`); APK release compila. **Falta validar no S23**: voltar,
+  tempo de troca dos Shorts, feed da conta e o login da Twitch com conta real.
+  `playback_providers_test` já falhava antes (2 testes do PPPlayer original).
+
+### Celular 1.0.5 — aquecimento e janela flutuante (21/11/2026)
+
+- **Aquecimento**: o player decodificava por hardware mas em modo cópia
+  (`hwdec-current=mediacodec-copy`, `vo=gpu`): cada quadro de um Short
+  1080×1920 a 60 fps ia para a memória e voltava para a GPU. No Android o
+  decodificador agora desenha direto na superfície do vídeo
+  (`vo=mediacodec_embed`, `hwdec=mediacodec`). Medido no S23 tocando um
+  Short: de ~75–110 % para ~50–60 % de um núcleo; pausado, 0 %. O que sobra é
+  o Flutter compondo cada quadro do vídeo.
+- Tela de Shorts não é reconstruída a cada atualização de posição (só a linha
+  de progresso acompanha); log detalhado do mpv só em build de depuração.
+- Shorts: o degradê sob o título engolia os toques e tocar na metade de baixo
+  não pausava. Um Short cujo link rápido (cliente iOS) dá 403 passa a ser
+  tentado de novo pela extração completa, sem repetir o mesmo link 3 vezes.
+- **Janela flutuante (PiP)**: ligada por padrão no Android. Ao sair do app com
+  um vídeo, Short ou live da Twitch tocando, ele continua numa janela no
+  formato do vídeo (vertical nos Shorts). Botão de PiP no player do YouTube,
+  da Twitch e no topo dos Shorts; chave em Você › Ajustes. Corrigido: a janela
+  guardava o formato do primeiro vídeo, e ao voltar do PiP a interface ficava
+  escondida (o pedido de PiP nunca era dado como concluído).
+- Testado no S23 por adb: PiP automático (vídeo e Twitch), botão nos Shorts,
+  volta ao app com a interface completa. Não testado: vídeo sem decodificador
+  de hardware no modo direto, PiP com legendas e com chat sobreposto.
+
+### Celular 1.0.6 + Relógio 0.5.0 — só áudio, controles no relógio, conta no relógio (21/11/2026)
+
+- **Só áudio de verdade**: virou uma preferência própria (`audioOnlyProvider`).
+  Antes, abrir qualquer vídeo forçava `PlayerView.video` e desfazia a escolha.
+  Agora a escolha fica entre vídeos, a tela Assistir mostra a capa com o selo
+  "Só áudio" em vez de tela preta, e há chave em Você › Reprodução e qualidade.
+  Shorts continuam com vídeo.
+- **Qualidade do áudio** (Econômica ~50 kbps / Normal ~128 kbps / Alta ~160 kbps,
+  `AudioQuality.kt`), aplicada ao só áudio e à faixa de áudio dos vídeos. Em
+  vídeos com dublagem a faixa escolhida é sempre a original (antes podia vir a
+  dublada ou a cópia "volume estável"). **Economia na rede móvel** (desligada por
+  padrão): fora do Wi-Fi, vídeo até 480p e áudio econômico.
+- **mpv**: em só áudio a faixa de vídeo fica desligada (`vid=no`) e o cache vira
+  2 min / 16 MB; vídeo lê 1 min à frente / 64 MB (antes 100 s / 150 MB + 50 MB
+  para trás — memória e dados jogados fora a cada pulo). Com o app em segundo
+  plano sem PiP (ou tela bloqueada), a imagem é suspensa: o áudio continua e o
+  vídeo não é decodificado nem baixado até voltar.
+- **Performance**: a posição do mpv chegava a cada quadro (até 60×/s) e cada
+  uma reconstruía o estado do player; agora ~5×/s (saltos e buscas na hora).
+  O mini player só reconstrói a linha de progresso.
+- **Controles no relógio (sessão de mídia do celular)**: ±10 s (`fastForward`/
+  `rewind`), sem barra/busca em lives (antes uma barra parada em 0:00), capa
+  reduzida a 512 px (chega mais rápido pelo Bluetooth), e em Shorts
+  próximo/anterior passam o feed (antes não faziam nada: a fila tinha 1 item).
+- **Relógio — Entrar com o celular**: o Wear OS não tem WebView, então o login
+  do Google não abre no relógio. O relógio liga o Wi-Fi, mostra QR + endereço +
+  código de 16 caracteres; o celular (já com a conta) envia os cookies cifrados
+  com AES-GCM (chave derivada do código, que nunca passa pela rede). Pelo QR a
+  câmera abre a página do relógio, que chama `ultratube://link` no app; ou em
+  Você › Conectar relógio digitando endereço e código (`WatchLink.kt`,
+  `AccountLink.kt`, `WatchLinkActivity.kt`). Com conta: Para você, Inscrições,
+  Shorts da conta, Trocar de conta, Sair.
+- **Relógio — Shorts**: feed real do YouTube (o mesmo do celular; da conta quando
+  conectada) com títulos completados em paralelo e páginas novas ao deslizar;
+  resolução rápida pelo cliente do app (como no celular) e áudio econômico no
+  vídeo do relógio. A busca por tema ficou como reserva.
+- Testes: `WatchLinkTest`, `AudioQualityTest` (JVM), testes Dart do controlador
+  e do motor; `flutter analyze` sem erros.
+- Limite conhecido: celular e relógio passam a usar a mesma sessão; se o Google
+  renovar os cookies em um deles, o outro pode precisar conectar de novo.
+- **Testado no Galaxy Watch 7 (0.5.0)**: Entrar com o celular (Wi-Fi ligou sozinho,
+  QR + endereço + código; enviado do S23 pelo QR → conta "Gustavo L" no relógio),
+  Para você com o Início da conta, Shorts da conta: 6 deslizes seguidos, todos
+  tocaram, resolução rápida em ~0,25 s cada. Achado no teste e corrigido: um Short
+  cujo link rápido dá 403 era pulado; agora é tentado de novo pela extração
+  completa (como no celular). Os botões Músicas · Vídeos · Shorts saíram de
+  Para você/Inscrições (buscavam o nome da tela).
+- O 0.4.1 do relógio tinha sido assinado com a chave de debug do Windows: foi
+  preciso desinstalar (downloads e favoritos do relógio foram apagados).
+- Sessão de mídia do celular (o que o relógio controla), testada no S23 com os
+  mesmos comandos que o relógio envia: ±10 s num vídeo de 2 h (10 → 20 → 31 → 20 s),
+  próximo nos Shorts passa o feed, e numa live a busca (barra) some da sessão.
+  O audio_service sempre anuncia ±10 s; numa live o app ignora o comando (a live
+  seguiu sem salto). Não testado tocando os botões no próprio relógio.
+- **Shorts — atualizar o feed** (celular e relógio): puxar para baixo no primeiro
+  Short, botão ⟳ no topo (celular) ou "Atualizar" na fila (relógio), e
+  "anterior" no primeiro Short — inclusive vindo do relógio/fone — trazem um
+  feed novo. O YouTube começa toda sequência pelo mesmo Short, então os que já
+  estavam no feed são descartados. No celular, um Short sem título espera até
+  0,8 s pelo título antes de tocar, para a notificação e o relógio não
+  mostrarem só "Shorts". Testado no S23: 3 atualizações seguidas, 3 Shorts
+  novos com título; próximo/anterior remotos ok. No Galaxy Watch (22/11):
+  puxar para baixo no primeiro Short e o botão "Atualizar" trazem feed novo,
+  próximo/anterior normais, e um Short com link rápido recusado (403) foi
+  recuperado pela extração completa em vez de pulado. O botão "Atualizar"
+  ganhou linha própria na fila (três botões não cabiam na tela redonda).
+
+### Código compartilhado celular ↔ relógio (22/11/2026)
+
+- **Letras**: havia três implementações (Kotlin compartilhado, port Dart do iOS e outra
+  direto na tela do celular). A tela agora usa o catálogo (`Catalog.lyrics` no Android,
+  `DartCatalog.lyrics` no iOS), e a limpeza do título — antes só no relógio — vale para
+  todos, com busca de reserva no LRCLIB quando o nome exato não acha. Teste:
+  `LyricsTitleTest`.
+- **Versões**: `android/gradle/libs.versions.toml` serve às duas builds Gradle que
+  compilam `android/media` (o celular importa o arquivo em `settings.gradle.kts`), então
+  o módulo compartilhado usa as mesmas bibliotecas nos dois apps.
+- README ganhou a seção "Código compartilhado" (o que é comum, o que é port do iOS e o
+  que é separado de propósito). Corrigido: o README dizia que o SponsorBlock estava em
+  `android/media`; ele só existe no Dart.
+
+### Celular 1.0.7 + Relógio 0.5.1 — portfólio e correções achadas nos prints (22/11/2026)
+
+- **Portfólio** em `docs/portfolio/`: 28 prints do celular, 20 do app do relógio e 3 do
+  relógio controlando o celular (recortados no formato redondo), logo (SVG/PNG, ícone,
+  símbolo, nome em fundo escuro/claro) e três imagens de destaque. README do projeto
+  reescrito com essas imagens.
+- **Fila do celular no relógio**: a sessão de mídia nunca publicava a fila, então "faixas
+  em fila" no controle do Galaxy Watch ficava vazio. Agora vão até 60 itens em volta do
+  atual, e tocar um item no relógio troca a música no celular (`publishQueue`,
+  `skipToQueueItem`). Testado: "Reproduzindo a faixa 2 de 21", toque num item → trocou.
+- **Play de fora com o celular bloqueado**: o pedido chegava, mas o app ficava sem rede
+  ("Unable to resolve host") porque só dizia "tocando" ao Android depois de o vídeo começar
+  — sem isso o serviço em primeiro plano não sobe. Agora o play já publica "tocando
+  (carregando)". Um play durante a restauração da fila salva era descartado; agora espera
+  ela terminar. Vídeo aberto sem nada na tela começa sem a faixa de imagem (o mpv travava
+  até o timeout pedindo uma superfície que não existe). Testado: celular bloqueado, app em
+  segundo plano, play de fora → toca.
+- **Plugins nativos em qualquer motor** (`UltratubeApplication`): quando o audio_service
+  liga o Flutter sem a tela (play pelo relógio/fone com o app fechado), os plugins do
+  Ultratube não existiam ("No implementation found for method resolve"). Agora o motor é
+  criado com eles. Limite que sobra: com o app encerrado pelo sistema, o mpv só termina de
+  inicializar com a tela — anotado em "Limites conhecidos".
+- **Aba Música do Início** voltou: o gráfico de música do NewPipe parou de responder;
+  `Catalog.kiosk` usa uma busca de reserva quando um gráfico falha (vale para o relógio).
+- **Textos com `&apos;`/`&nbsp;`** em comentários e descrições: o catálogo compartilhado
+  converte o HTML do YouTube em texto; o Dart também trata as entidades (iOS).
+- **Relógio**: Letra quebrava ("MediaController method is called from a wrong thread");
+  foto da conta saía borrada (pedia 88 px); código de entrada agora numa linha própria.

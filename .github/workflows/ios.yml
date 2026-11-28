@@ -5,10 +5,7 @@ name: Ultratube iOS (unsigned IPA)
 # de quem instala. Disparo manual para não gastar minutos de runner macOS.
 on:
   workflow_dispatch:
-
-concurrency:
-  group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 defaults:
   run:
@@ -50,13 +47,14 @@ jobs:
           rm -rf Payload
           mkdir Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry "Ultratube-${VERSION}-unsigned.ipa" Payload
+          VERSION=${VERSION%%+*}
+          zip -qry "Ultratube-${VERSION}-ios-unsigned.ipa" Payload
           ls -lh Ultratube-*.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Ultratube-iOS
-          path: ppplayer/Ultratube-*-unsigned.ipa
+          path: ppplayer/Ultratube-*-ios-unsigned.ipa
           if-no-files-found: error
           retention-days: 14

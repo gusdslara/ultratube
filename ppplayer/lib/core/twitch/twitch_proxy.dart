@@ -73,6 +73,11 @@ class TwitchProxy {
     });
   }
 
+  /// Binds the loopback server ahead of time. Called at app start so a live
+  /// URL restored by the player (after the process was killed in the
+  /// background) finds the proxy listening instead of "Connection refused".
+  Future<void> start() => _ensureServer().then((_) {}, onError: (Object _) {});
+
   /// Opens (or reuses) a channel session and returns the URL to play.
   /// Throws [TwitchException] when the channel is offline.
   Future<Uri> liveUrl(String login, {String quality = 'best'}) async {

@@ -17,10 +17,24 @@ Future<void> showQueueSheet(BuildContext context) => showModalBottomSheet<void>(
   builder: (_) => const _QueueSheet(),
 );
 
-/// YouTube-style queue: reorder, swipe to remove, shuffle, repeat,
-/// autoplay, clear and save as playlist.
-class _QueueSheet extends ConsumerWidget {
+class _QueueSheet extends StatelessWidget {
   const _QueueSheet();
+
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+    expand: false,
+    initialChildSize: 0.72,
+    minChildSize: 0.4,
+    maxChildSize: 0.95,
+    builder: (context, controller) => QueueView(controller: controller),
+  );
+}
+
+/// YouTube-style queue: reorder, swipe to remove, shuffle, repeat,
+/// autoplay, clear and save as playlist. Also embedded in the video menu.
+class QueueView extends ConsumerWidget {
+  const QueueView({super.key, this.controller});
+  final ScrollController? controller;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -31,12 +45,7 @@ class _QueueSheet extends ConsumerWidget {
     final current = state.currentIndex;
     final upcoming = (tracks.length - current - 1).clamp(0, tracks.length);
 
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.72,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      builder: (context, controller) => Column(
+    return Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(UT.s5, 0, UT.s2, UT.s2),
@@ -203,7 +212,6 @@ class _QueueSheet extends ConsumerWidget {
                   ),
           ),
         ],
-      ),
     );
   }
 }

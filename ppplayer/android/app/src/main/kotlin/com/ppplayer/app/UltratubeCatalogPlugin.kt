@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import app.ultratube.media.AudioQuality
 import app.ultratube.media.Catalog
 import app.ultratube.media.Downloads
 import app.ultratube.media.YoutubeAccount
@@ -24,7 +25,7 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
     private var downloads: MethodChannel? = null
     private var downloadEvents: EventChannel? = null
     private var context: Context? = null
-    private val executor = Executors.newFixedThreadPool(4)
+    private val executor = Executors.newFixedThreadPool(8)
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var attached = false
 
@@ -48,7 +49,8 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
                         "playlist" -> Catalog.playlist(str("url")).toString()
                         "video" -> Catalog.video(str("url")).toString()
                         "comments" -> Catalog.comments(str("url")).toString()
-                        "resolve" -> Catalog.resolve(str("url"), call.argument<Boolean>("video") ?: false, call.argument<Int>("maxHeight") ?: 1080).toString()
+                        "resolve" -> Catalog.resolve(str("url"), call.argument<Boolean>("video") ?: false, call.argument<Int>("maxHeight") ?: 1080,
+                            call.argument<Boolean>("fast") ?: false, AudioQuality.parse(call.argument<String>("audio"))).toString()
                         "related" -> Catalog.related(str("url")).toString()
                         "lyrics" -> Catalog.lyrics(str("title"), str("artist")).toString()
                         else -> throw UnsupportedOperationException(call.method)
@@ -77,6 +79,11 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
         account = MethodChannel(binding.binaryMessenger, "app.ultratube/account").also { channel ->
             channel.setMethodCallHandler { call, reply ->
                 val ctx = context ?: return@setMethodCallHandler reply.error("detached", null, null)
+                if (call.method == "linkWatch") {
+                    val host = activity ?: return@setMethodCallHandler reply.error("no_activity", "Abra o app", null)
+                    host.startActivity(Intent(host, WatchLinkActivity::class.java))
+                    return@setMethodCallHandler reply.success(true)
+                }
                 if (call.method == "signIn") {
                     val host = activity ?: return@setMethodCallHandler reply.error("no_activity", "Abra o app para entrar", null)
                     YoutubeLoginActivity.onResult?.invoke(false) // a previous, abandoned attempt
@@ -89,6 +96,8 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
                         "info" -> YoutubeAccount.info(ctx).toString()
                         "subscriptions" -> YoutubeAccount.subscriptions(ctx).toString()
                         "home" -> YoutubeAccount.home(ctx, call.argument<String>("token")).toString()
+                        "shorts" -> YoutubeAccount.shorts(ctx, call.argument<String>("token")).toString()
+                        "shortInfo" -> YoutubeAccount.shortInfo(ctx, call.argument<String>("id") ?: "").toString()
                         "signOut" -> { YoutubeAccount.signOut(ctx); "true" }
                         else -> throw UnsupportedOperationException(call.method)
                     }
@@ -112,7 +121,13 @@ class UltratubeCatalogPlugin : FlutterPlugin, ActivityAware {
     private fun background(reply: MethodChannel.Result, task: () -> String) {
         executor.execute {
             val response = runCatching(task)
-            main.post { if (attached) response.fold({ reply.success(it) }, { reply.error("ultratube_error", it.localizedMessage, null) }) }
+            // "unavailable" = this item can never play (private/removed/age/region);
+            // Dart retries "ultratube_error" (network, YouTube hiccups) on its own.
+            main.post {
+                if (attached) response.fold({ reply.success(it) }, {
+                    reply.error(if (Catalog.isPermanent(it)) "unavailable" else "ultratube_error", it.localizedMessage, null)
+                })
+            }
         }
     }
 

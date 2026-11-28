@@ -20,8 +20,11 @@ import '../downloads/track_actions_button.dart';
 import '../live/live_chat_view.dart';
 import '../player/player_providers.dart';
 import 'ask_sheet.dart';
+import 'pip_button.dart';
 import 'playlist_picker.dart';
 import 'queue_sheet.dart';
+import 'video_menu_sheet.dart';
+import 'comments_sheet.dart' show plainComment;
 import 'yt_widgets.dart';
 
 /// YouTube-style watch page. The video itself is the app-wide playback
@@ -131,7 +134,7 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
     });
   }
 
-  Future<void> _open(String id, YtItem? item, {required bool startPlayback}) async {
+  Future<void> _open(String id, YtItem? item, {required bool startPlayback, bool keepContext = false}) async {
     final generation = ++_generation;
     setState(() {
       _id = id;
@@ -144,10 +147,14 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
     final player = ref.read(playerProvider.notifier);
     final current = ref.read(playerProvider).currentTrack?.youtubeVideoId;
     if (startPlayback && current != id) {
-      // Also turns video on (setPlayerView keeps showVideo in sync).
-      await ref.read(settingsProvider.notifier).setPlayerView(PlayerView.video);
+      // Picture on, unless the viewer chose "Só áudio" (that choice sticks
+      // across videos; setPlayerView keeps showVideo in sync).
+      await ref.read(settingsProvider.notifier).setPlayerView(
+        ref.read(audioOnlyProvider) ? PlayerView.artwork : PlayerView.video,
+      );
       final track = (item ?? YtItem(kind: YtKind.video, url: 'https://www.youtube.com/watch?v=$id', title: '')).toTrack();
-      unawaited(player.playTrack(track, queue: [track]));
+      // Goes in right after the current item; the queue is kept.
+      unawaited(player.playNow(track, keepContext: keepContext));
     }
     try {
       final video = await _catalog.video('https://www.youtube.com/watch?v=$id');
@@ -158,10 +165,11 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
         _syncLive();
       });
       ref.read(historyProvider.notifier).add(video.item);
-      // Fill "up next" so the queue continues like YouTube autoplay.
+      // Nothing queued after this video: its "up next" becomes the queue
+      // (as automatic items, so anything the viewer adds plays before them).
       final state = ref.read(playerProvider);
       if (state.currentTrack?.youtubeVideoId == id && state.queue.length - state.currentIndex <= 1) {
-        player.addTracksToQueue([
+        player.addAutoplayTracks([
           for (final r in video.related.where((r) => r.videoId != null && !r.shorts && !r.live).take(10)) r.toTrack(),
         ]);
       }
@@ -175,7 +183,8 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
       openItem(context, item);
       return;
     }
-    _open(item.videoId!, item, startPlayback: true);
+    // Picked on the watch page: the playlist/queue being played continues after it.
+    _open(item.videoId!, item, startPlayback: true, keepContext: true);
   }
 
   Future<void> _toggleFullscreen() async {
@@ -228,6 +237,8 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
       }
     });
     _measure();
+    // "A seguir" below is the queue: redraw when it changes.
+    ref.watch(playerProvider.select((s) => s.playbackQueue));
     final colors = Theme.of(context).colorScheme;
     // Phones: rotating to landscape goes full screen, like YouTube (a 16:9
     // slot plus details cannot fit). Desktop windows are landscape by nature:
@@ -303,23 +314,70 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
 
   /// "Up next" column for wide windows.
   Widget _upNext() {
-    final video = _video;
-    if (video == null) return const SizedBox.shrink();
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(0, UT.s4, UT.s4, 120),
-      itemCount: video.related.length + 1,
-      itemBuilder: (context, i) {
-        if (i == 0) {
-          return const Padding(
-            padding: EdgeInsets.fromLTRB(UT.s3, 0, 0, UT.s2),
-            child: Text('A seguir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+    if (_video == null) return const SizedBox.shrink();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(0, UT.s2, UT.s4, 120),
+      children: _nextRows(),
+    );
+  }
+
+  static const _queueShown = 20;
+
+  /// "A seguir" is the queue itself — what really plays next, in order
+  /// (playlist, what the viewer queued, then automatic suggestions) —
+  /// followed by the related videos that are not in it.
+  List<Widget> _nextRows() {
+    final state = ref.read(playerProvider);
+    final notifier = ref.read(playerProvider.notifier);
+    final rows = <Widget>[];
+    final queued = <String>{};
+    if (state.currentTrack?.youtubeVideoId == _id) {
+      final queue = state.queue;
+      for (var i = state.currentIndex + 1; i < queue.length; i++) {
+        final t = queue[i];
+        final id = t.youtubeVideoId;
+        if (id == null) continue;
+        queued.add(id);
+        if (rows.length < _queueShown) {
+          rows.add(
+            VideoRow(
+              YtItem.fromTrack(t),
+              key: ValueKey('queue:${t.queueItemId ?? i}'),
+              onTap: () => notifier.skipTo(i),
+            ),
           );
         }
-        final r = video.related[i - 1];
-        if (r.kind == YtKind.channel) return ChannelTile(r);
-        return VideoRow(r, onTap: () => _play(r));
-      },
-    );
+      }
+      if (queued.isNotEmpty) {
+        rows.insert(
+          0,
+          _SectionHeader(
+            'A seguir',
+            detail: state.isShuffled ? 'ordem aleatória' : '${queued.length} na fila',
+            onQueue: () => showQueueSheet(context),
+          ),
+        );
+        if (queued.length > rows.length - 1) {
+          rows.add(
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.queue_music, color: UT.text2),
+              title: Text('Ver a fila inteira (${queued.length})', style: const TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () => showQueueSheet(context),
+            ),
+          );
+        }
+      }
+    }
+    final related = [
+      for (final r in _video?.related ?? const <YtItem>[])
+        if (r.videoId == null || (r.videoId != _id && !queued.contains(r.videoId))) r,
+    ];
+    if (related.isNotEmpty) rows.add(const _SectionHeader('Relacionados'));
+    for (final r in related) {
+      rows.add(r.kind == YtKind.channel ? ChannelTile(r) : VideoRow(r, onTap: () => _play(r)));
+    }
+    return rows;
   }
 
   Widget _details(BuildContext context, {bool related = true}) {
@@ -407,15 +465,7 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
             ),
           ),
         ),
-        if (video != null && related)
-          SliverList.builder(
-            itemCount: video.related.length,
-            itemBuilder: (context, i) {
-              final r = video.related[i];
-              if (r.kind == YtKind.channel) return ChannelTile(r);
-              return VideoRow(r, onTap: () => _play(r));
-            },
-          ),
+        if (video != null && related) SliverList.list(children: _nextRows()),
         const SliverToBoxAdapter(child: SizedBox(height: 120)),
       ],
     );
@@ -423,7 +473,8 @@ class _WatchScreenState extends ConsumerState<WatchScreen> with WidgetsBindingOb
 
   void _description(BuildContext context, YtVideo video) {
     final colors = Theme.of(context).colorScheme;
-    final text = video.description.replaceAll(RegExp(r'<br\s*/?>'), '\n').replaceAll(RegExp(r'<[^>]+>'), '').replaceAll('&amp;', '&').replaceAll('&quot;', '"').replaceAll('&#39;', "'");
+    // Same clean-up as comments (the iOS catalog may still send HTML).
+    final text = plainComment(video.description);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -480,7 +531,7 @@ class _Actions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final audioOnly = !ref.watch(settingsProvider.select((s) => s.showVideo));
+    final audioOnly = ref.watch(audioOnlyProvider);
     Widget pill(IconData icon, String label, VoidCallback? onTap, {bool active = false}) {
       return Padding(
         padding: const EdgeInsets.only(right: 8),
@@ -530,7 +581,7 @@ class _Actions extends ConsumerWidget {
           pill(
             audioOnly ? Icons.headphones : Icons.headphones_outlined,
             'Só áudio',
-            () => ref.read(settingsProvider.notifier).toggleVideo(),
+            () => toggleAudioOnly(context, ref),
             active: audioOnly,
           ),
           pill(Icons.share_outlined, 'Compartilhar', () {
@@ -835,6 +886,20 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
   double? _drag;
   String? _flash;
 
+  /// Vertical drag on the picture: pulling down past [_menuPull] (or a quick
+  /// flick) opens the video menu (options, queue, playlist).
+  double _pull = 0;
+  static const _menuPull = 56.0;
+
+  void _openMenu([VideoMenuTab tab = VideoMenuTab.options]) =>
+      showVideoMenu(context, item: widget.item, live: widget.live, initial: tab);
+
+  void _pullEnd(DragEndDetails d) {
+    final open = _pull > _menuPull || (d.primaryVelocity ?? 0) > 600;
+    setState(() => _pull = 0);
+    if (open) _openMenu();
+  }
+
   /// Paused during a live: playback resumes behind the live edge.
   bool _behind = false;
 
@@ -902,9 +967,9 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
     });
     final state = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
-    final quality = ref.watch(videoQualityProvider);
     final autoplay = ref.watch(ultratubeAutoplayProvider);
     final chatPrefs = ref.watch(liveChatPrefsProvider);
+    final audioOnly = !ref.watch(settingsProvider.select((s) => s.showVideo));
     final live = widget.live;
     // Lives have no fixed duration, so "started" can't wait for one.
     final started = state.currentTrack?.youtubeVideoId == widget.item?.videoId &&
@@ -928,6 +993,30 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
         children: [
           if (!started && widget.item != null && widget.item!.bestCover.isNotEmpty)
             Opacity(opacity: 0.6, child: NetImage(widget.item!.bestCover)),
+          // Audio only: the cover stands in for the picture.
+          if (started && audioOnly) ...[
+            if (widget.item != null && widget.item!.bestCover.isNotEmpty) NetImage(widget.item!.bestCover),
+            const Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: EdgeInsets.all(10),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.all(Radius.circular(12))),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.headphones, size: 14, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Só áudio', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           if (loading && state.loadError == null) const Center(child: CircularProgressIndicator(color: Colors.white)),
           if (state.loadError != null)
             Center(
@@ -954,8 +1043,15 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
               child: const ColoredBox(color: Colors.black38),
             ),
           ),
-          // Gestures: tap toggles controls, double-tap sides seeks ±10 s.
-          Row(
+          // Gestures: tap toggles controls, double-tap sides seeks ±10 s,
+          // dragging down opens the video menu.
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onVerticalDragStart: (_) => _pull = 0,
+            onVerticalDragUpdate: (d) => setState(() => _pull = (_pull + d.delta.dy).clamp(0.0, _menuPull * 2)),
+            onVerticalDragEnd: _pullEnd,
+            onVerticalDragCancel: () => setState(() => _pull = 0),
+            child: Row(
             children: [
               Expanded(
                 child: GestureDetector(
@@ -974,6 +1070,35 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
               ),
             ],
           ),
+          ),
+          // Pull feedback: a chip slides in from the top while dragging.
+          if (_pull > 0)
+            IgnorePointer(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Transform.translate(
+                  offset: Offset(0, (_pull / 2).clamp(0.0, _menuPull) - 8),
+                  child: Opacity(
+                    opacity: (_pull / _menuPull).clamp(0.0, 1.0),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_pull > _menuPull ? Icons.expand_more : Icons.drag_handle, size: 16, color: Colors.white),
+                          const SizedBox(width: 6),
+                          Text(
+                            _pull > _menuPull ? 'Solte para abrir' : 'Opções · Fila · Playlist',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Transparent live chat over the picture (toggle + opacity in the
           // chat settings). Moves up while the controls are showing.
           if (showOverlay)
@@ -1033,14 +1158,15 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
                     Positioned(
                       top: 4,
                       right: 4,
-                      child: PopupMenuButton<int>(
-                        tooltip: 'Qualidade',
-                        icon: const Icon(Icons.settings_outlined, color: Colors.white),
-                        initialValue: quality,
-                        onSelected: ref.read(videoQualityProvider.notifier).set,
-                        itemBuilder: (_) => [
-                          for (final h in VideoQualityNotifier.options.reversed)
-                            CheckedPopupMenuItem(value: h, checked: h == quality, child: Text(h >= 2160 ? '${h}p 4K' : '${h}p')),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const PipButton(),
+                          IconButton(
+                            tooltip: 'Opções do vídeo (ou arraste para baixo)',
+                            icon: const Icon(Icons.settings_outlined, color: Colors.white),
+                            onPressed: _openMenu,
+                          ),
                         ],
                       ),
                     ),
@@ -1173,4 +1299,44 @@ class _VideoSlotState extends ConsumerState<_VideoSlot> {
     ),
     );
   }
+}
+
+/// Title of a list section on the watch page, optionally with a shortcut
+/// to the full queue.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.title, {this.detail, this.onQueue});
+  final String title;
+  final String? detail;
+  final VoidCallback? onQueue;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(UT.s3, UT.s2, UT.s2, UT.s1),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 44),
+      child: Row(
+        children: [
+          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          if (detail != null) ...[
+            const SizedBox(width: UT.s2),
+            Expanded(
+              child: Text(
+                detail!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: UT.text2, fontSize: 12.5),
+              ),
+            ),
+          ] else
+            const Spacer(),
+          if (onQueue != null)
+            TextButton.icon(
+              onPressed: onQueue,
+              icon: const Icon(Icons.queue_music, size: 18),
+              label: const Text('Fila'),
+            ),
+        ],
+      ),
+    ),
+  );
 }

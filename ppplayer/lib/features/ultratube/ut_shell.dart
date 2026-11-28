@@ -236,7 +236,19 @@ class UtMiniPlayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(playerProvider);
+    // Only what the bar shows: the position ticks several times a second
+    // and would rebuild the whole bar (always on screen) every time. The
+    // progress line follows it on its own (_MiniProgress).
+    final state = ref.watch(
+      playerProvider.select(
+        (s) => (
+          currentTrack: s.currentTrack,
+          loadError: s.loadError,
+          isLoadingVideo: s.isLoadingVideo,
+          isPlaying: s.isPlaying,
+        ),
+      ),
+    );
     final track = state.currentTrack;
     if (track == null) return const SizedBox.shrink();
     final showVideo = ref.watch(settingsProvider.select((s) => s.showVideo));
@@ -245,12 +257,6 @@ class UtMiniPlayer extends ConsumerWidget {
     final youtube = (track.youtubeVideoId != null && track.spotifyId.contains(':') && !track.spotifyId.startsWith('local')) ||
         twitchRoute != null;
     final live = track.liveStatus == StreamLiveStatus.live;
-    // A live has no timeline: show a full bar instead of a stuck one.
-    final progress = live
-        ? 1.0
-        : state.duration.inMilliseconds > 0
-        ? (state.position.inMilliseconds / state.duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
     final cover = track.localArtworkPath ?? track.albumImage ?? '';
 
     void open() {
@@ -330,21 +336,39 @@ class UtMiniPlayer extends ConsumerWidget {
                     const SizedBox(width: 2),
                   ],
                 ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 2,
-                    color: UT.red,
-                    backgroundColor: Colors.transparent,
-                  ),
-                ),
+                Positioned(left: 0, right: 0, bottom: 0, child: _MiniProgress(live: live)),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The mini player's 2 px progress line: the only part that follows the
+/// playback position, in steps of 1/300 (finer than the line can show).
+class _MiniProgress extends ConsumerWidget {
+  const _MiniProgress({required this.live});
+  final bool live;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final progress = live
+        // A live has no timeline: show a full bar instead of a stuck one.
+        ? 1.0
+        : ref.watch(
+            playerProvider.select((s) {
+              final total = s.duration.inMilliseconds;
+              if (total <= 0) return 0.0;
+              return ((s.position.inMilliseconds / total).clamp(0.0, 1.0) * 300).roundToDouble() / 300;
+            }),
+          );
+    return RepaintBoundary(
+      child: LinearProgressIndicator(
+        value: progress,
+        minHeight: 2,
+        color: UT.red,
+        backgroundColor: Colors.transparent,
       ),
     );
   }

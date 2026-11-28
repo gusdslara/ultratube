@@ -1,8 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 import 'package:hive_ce/hive_ce.dart';
 
 import '../api/yt_models.dart';
@@ -377,4 +381,105 @@ class VideoQualityNotifier extends Notifier<int> {
 
 final videoQualityProvider = NotifierProvider<VideoQualityNotifier, int>(
   VideoQualityNotifier.new,
+);
+
+
+/// "Só áudio" chosen by the viewer. Kept apart from the player view (which
+/// Shorts and the music screens also switch) so opening another video never
+/// turns the picture back on behind the viewer's back.
+class AudioOnlyNotifier extends Notifier<bool> {
+  @override
+  bool build() => UltratubeStore.box.get('audioOnly', defaultValue: false) as bool;
+  void set(bool value) {
+    state = value;
+    UltratubeStore.box.put('audioOnly', value);
+  }
+}
+
+final audioOnlyProvider = NotifierProvider<AudioOnlyNotifier, bool>(AudioOnlyNotifier.new);
+
+/// Audio track quality (audio-only playback and the audio half of videos).
+/// Matches `AudioQuality` in the native catalog.
+class AudioQualityNotifier extends Notifier<String> {
+  static const options = ['low', 'normal', 'high'];
+  static String label(String value) => switch (value) {
+    'low' => 'Econômica (~50 kbps)',
+    'high' => 'Alta (~160 kbps)',
+    _ => 'Normal (~128 kbps)',
+  };
+
+  @override
+  String build() {
+    final value = UltratubeStore.box.get('audioQuality', defaultValue: 'normal') as String;
+    return options.contains(value) ? value : 'normal';
+  }
+
+  void set(String value) {
+    state = value;
+    UltratubeStore.box.put('audioQuality', value);
+  }
+}
+
+final audioQualityProvider = NotifierProvider<AudioQualityNotifier, String>(AudioQualityNotifier.new);
+
+/// On mobile data: video at most [MobileDataSaverNotifier.maxHeight] and the
+/// data-saver audio track, whatever the Wi-Fi choices are.
+class MobileDataSaverNotifier extends Notifier<bool> {
+  static const maxHeight = 480;
+  @override
+  bool build() => UltratubeStore.box.get('mobileDataSaver', defaultValue: false) as bool;
+  void set(bool value) {
+    state = value;
+    UltratubeStore.box.put('mobileDataSaver', value);
+  }
+}
+
+final mobileDataSaverProvider = NotifierProvider<MobileDataSaverNotifier, bool>(MobileDataSaverNotifier.new);
+
+/// Whether the active connection is metered mobile data. Kept current from
+/// the platform's change events, so reading it costs nothing at resolve time.
+class NetworkKind {
+  NetworkKind._();
+  static bool _cellular = false;
+  static StreamSubscription<List<ConnectivityResult>>? _subscription;
+
+  static bool get cellular {
+    _start();
+    return _cellular;
+  }
+
+  static void _start() {
+    if (_subscription != null || kIsWeb) return;
+    final connectivity = Connectivity();
+    void apply(List<ConnectivityResult> results) {
+      // Wi-Fi/ethernet win when both are up (Android keeps mobile data alive).
+      _cellular = results.contains(ConnectivityResult.mobile) &&
+          !results.contains(ConnectivityResult.wifi) &&
+          !results.contains(ConnectivityResult.ethernet);
+    }
+
+    _subscription = connectivity.onConnectivityChanged.listen(apply, onError: (Object _) {});
+    unawaited(connectivity.checkConnectivity().then(apply, onError: (Object _) {}));
+  }
+}
+
+/// What to stream right now: the viewer's choices, narrowed by the mobile
+/// data saver while on mobile data.
+typedef StreamProfile = ({int maxHeight, String audio});
+
+StreamProfile streamProfile(int maxHeight, String audio, {required bool dataSaver}) {
+  if (dataSaver && NetworkKind.cellular) {
+    return (
+      maxHeight: maxHeight < MobileDataSaverNotifier.maxHeight ? maxHeight : MobileDataSaverNotifier.maxHeight,
+      audio: 'low',
+    );
+  }
+  return (maxHeight: maxHeight, audio: audio);
+}
+
+/// [streamProfile] from the stored preferences.
+StreamProfile readStreamProfile(T Function<T>(ProviderListenable<T>) read) => streamProfile(
+  read(videoQualityProvider),
+  read(audioQualityProvider),
+  dataSaver: read(mobileDataSaverProvider),
 );

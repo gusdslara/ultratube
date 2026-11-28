@@ -6,7 +6,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../player/player_provider.dart';
 import 'playback_providers.dart' show playbackControllerProvider;
+import 'media_sync_service.dart' show mediaSyncServiceProvider;
 import '../services/favorites_provider.dart';
+
+/// Lets a full-screen feed (Shorts) take over "next"/"previous" from the
+/// system controls — notification, headset, a paired watch — while it is
+/// open: its queue is the feed, not the player's one-item queue.
+class RemoteSkipOverride {
+  RemoteSkipOverride._();
+  static bool Function()? next;
+  static bool Function()? previous;
+}
 
 /// An [AudioHandler] that bridges the Flutter player state with the system media controls.
 /// It doesn't play audio itself (the WebView does), but it reports the state to the OS.
@@ -240,8 +250,10 @@ class PpPlayerAudioHandler extends BaseAudioHandler with QueueHandler {
     bool isIFrameMode = false,
     double speed = 1.0,
     AudioProcessingState processingState = AudioProcessingState.ready,
+    bool live = false,
   }) {
     _webKitOwnsAudioSession = isIFrameMode;
+    _live = live;
     if (!playing) {
       _audioSessionActivated = false;
       _audioSessionRevision++;
@@ -257,8 +269,15 @@ class PpPlayerAudioHandler extends BaseAudioHandler with QueueHandler {
           MediaControl.skipToNext,
           MediaControl.stop,
         ],
-        systemActions: const {
-          MediaAction.seek,
+        // Seek, ±10 s and the progress bar only make sense with a timeline:
+        // a live has none, and offering them made watches (Wear OS media
+        // controls) show a stuck bar and buttons that did nothing.
+        systemActions: {
+          if (!live) ...const {
+            MediaAction.seek,
+            MediaAction.fastForward,
+            MediaAction.rewind,
+          },
           MediaAction.play,
           MediaAction.pause,
           MediaAction.skipToNext,
@@ -317,6 +336,7 @@ class PpPlayerAudioHandler extends BaseAudioHandler with QueueHandler {
   @override
   Future<void> play() async {
     debugPrint('[MediaControls] system play');
+    _container.read(mediaSyncServiceProvider).playRequested();
     await _ensureAudioSessionActive();
     await _container.read(playerProvider.notifier).resume();
   }
@@ -331,17 +351,87 @@ class PpPlayerAudioHandler extends BaseAudioHandler with QueueHandler {
 
   @override
   Future<void> skipToNext() async {
+    if (RemoteSkipOverride.next?.call() ?? false) return;
     _container.read(playerProvider.notifier).skipNext();
   }
 
   @override
   Future<void> skipToPrevious() async {
+    if (RemoteSkipOverride.previous?.call() ?? false) return;
     _container.read(playerProvider.notifier).skipPrevious();
+  }
+
+  /// What a paired watch (or car) lists as "faixas em fila", with the
+  /// playing item marked. Capped: the list goes over Bluetooth on every
+  /// change, and nobody scrolls 500 items on a wrist.
+  static const _queueWindow = 60;
+  int _queueStart = 0;
+  String? _queueSignature;
+
+  void publishQueue(List<Track> tracks, int currentIndex) {
+    if (tracks.isEmpty) {
+      if (_queueSignature != null) {
+        _queueSignature = null;
+        queue.add(const []);
+        playbackState.add(playbackState.value.copyWith(queueIndex: null));
+      }
+      return;
+    }
+    final current = currentIndex.clamp(0, tracks.length - 1);
+    // A window that starts a few items before the current one.
+    final start = (current - 5).clamp(0, (tracks.length - _queueWindow).clamp(0, tracks.length));
+    final end = (start + _queueWindow).clamp(0, tracks.length);
+    final window = tracks.sublist(start, end);
+    final signature = '$start|${window.map((t) => t.queueItemId ?? t.spotifyId).join(',')}';
+    if (signature != _queueSignature) {
+      _queueSignature = signature;
+      _queueStart = start;
+      queue.add([
+        for (final t in window)
+          MediaItem(
+            id: t.queueItemId ?? t.spotifyId,
+            title: t.name,
+            artist: t.artistName,
+            artUri: (t.albumImage?.startsWith('http') ?? false) ? Uri.parse(t.albumImage!) : null,
+            duration: t.durationMs == null ? null : Duration(milliseconds: t.durationMs!),
+          ),
+      ]);
+    }
+    playbackState.add(playbackState.value.copyWith(queueIndex: current - _queueStart));
+  }
+
+  /// A queue item picked on the watch.
+  @override
+  Future<void> skipToQueueItem(int index) async {
+    _container.read(mediaSyncServiceProvider).playRequested();
+    _container.read(playerProvider.notifier).skipTo(_queueStart + index);
   }
 
   @override
   Future<void> seek(Duration position) async {
+    if (_live) return;
     await _container.read(playerProvider.notifier).seekTo(position);
+  }
+
+  bool _live = false;
+  static const _jump = Duration(seconds: 10);
+
+  /// ±10 s from a watch, headset or car (same step as double-tap on video).
+  @override
+  Future<void> fastForward() => _seekBy(_jump);
+
+  @override
+  Future<void> rewind() => _seekBy(-_jump);
+
+  Future<void> _seekBy(Duration delta) async {
+    if (_live) return;
+    final state = _container.read(playerProvider);
+    var target = state.position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (state.duration > Duration.zero && target > state.duration) {
+      target = state.duration - const Duration(seconds: 1);
+    }
+    await seek(target);
   }
 
   @override

@@ -58,19 +58,68 @@ class TwitchStream {
 }
 
 class TwitchGame {
-  const TwitchGame({required this.id, required this.name, required this.displayName, this.boxArt = '', this.viewers = -1});
+  const TwitchGame({
+    required this.id,
+    required this.name,
+    required this.displayName,
+    this.boxArt = '',
+    this.viewers = -1,
+    this.followers = -1,
+    this.tags = const [],
+  });
   factory TwitchGame.fromNode(Map n) => TwitchGame(
     id: n['id'] as String? ?? '',
     name: n['name'] as String? ?? '',
     displayName: n['displayName'] as String? ?? n['name'] as String? ?? '',
     boxArt: n['boxArtURL'] as String? ?? '',
     viewers: (n['viewersCount'] as num?)?.toInt() ?? -1,
+    followers: (n['followersCount'] as num?)?.toInt() ?? -1,
+    tags: [
+      for (final t in (n['tags'] as List? ?? const []))
+        if (t is Map && (t['localizedName'] as String? ?? '').isNotEmpty) t['localizedName'] as String,
+    ],
   );
   final String id;
   final String name;
   final String displayName;
   final String boxArt;
   final int viewers;
+  final int followers;
+
+  /// Genre tags ("FPS", "RPG", "IRL"…).
+  final List<String> tags;
+}
+
+/// Order of a category's live channels.
+enum TwitchSort {
+  viewers('VIEWER_COUNT', 'Mais vistos'),
+  recent('RECENT', 'Começaram agora'),
+  fewest('VIEWER_COUNT_ASC', 'Menos vistos');
+
+  const TwitchSort(this.gql, this.label);
+  final String gql;
+  final String label;
+}
+
+/// Everything one search returns.
+class TwitchSearchResults {
+  const TwitchSearchResults({this.channels = const [], this.games = const [], this.streams = const [], this.videos = const []});
+  final List<TwitchChannel> channels;
+  final List<TwitchGame> games;
+  final List<TwitchStream> streams;
+  final List<TwitchVideo> videos;
+  bool get isEmpty => channels.isEmpty && games.isEmpty && streams.isEmpty && videos.isEmpty;
+}
+
+/// Autocomplete entry: a channel ([login] set), a category ([game] set) or
+/// plain text.
+class TwitchSuggestion {
+  const TwitchSuggestion({required this.text, this.login = '', this.game = '', this.image = '', this.live = false});
+  final String text;
+  final String login;
+  final String game;
+  final String image;
+  final bool live;
 }
 
 class TwitchVideo {
@@ -93,8 +142,8 @@ class TwitchVideo {
     thumbnail: n['previewThumbnailURL'] as String? ?? '',
     publishedAt: DateTime.tryParse(n['publishedAt'] as String? ?? ''),
     game: (n['game'] as Map?)?['displayName'] as String? ?? '',
-    login: login,
-    displayName: displayName,
+    login: login.isNotEmpty ? login : (n['owner'] as Map?)?['login'] as String? ?? '',
+    displayName: displayName.isNotEmpty ? displayName : (n['owner'] as Map?)?['displayName'] as String? ?? '',
   );
   final String id;
   final String title;
@@ -175,12 +224,15 @@ class TwitchApi {
 
   static bool validLogin(String login) => _login.hasMatch(login);
 
-  Future<Map<String, dynamic>> _gql(String query, [Map<String, Object?>? variables]) async {
+  /// [auth]: `(client id, user token)` of a signed-in account; a token only
+  /// works with the client id it was issued to.
+  Future<Map<String, dynamic>> _gql(String query, [Map<String, Object?>? variables, (String, String)? auth]) async {
     final res = await _http
         .post(
           Uri.parse('https://gql.twitch.tv/gql'),
           headers: {
-            'Client-ID': clientId,
+            'Client-ID': auth?.$1 ?? clientId,
+            if (auth != null) 'Authorization': 'OAuth ${auth.$2}',
             'X-Device-Id': _deviceId,
             'Content-Type': 'application/json',
             'User-Agent': _ua,
@@ -222,7 +274,7 @@ class TwitchApi {
   Future<TwitchPage<TwitchGame>> topGames({int first = 60}) async {
     final data = await _gql(
       'query(\$first: Int) { games(first: \$first) '
-      '{ edges { cursor node { id name displayName viewersCount boxArtURL(width: 285, height: 380) } } } }',
+      '{ edges { cursor node { id name displayName viewersCount boxArtURL(width: 285, height: 380) tags(tagType: CONTENT) { localizedName } } } } }',
       {'first': first.clamp(1, 100)},
     );
     final edges = data['games']?['edges'] as List? ?? const [];
@@ -231,11 +283,17 @@ class TwitchApi {
 
   /// Live channels of one category (by its name, e.g. "Just Chatting"),
   /// up to 100 at once.
-  Future<(TwitchGame?, TwitchPage<TwitchStream>)> gameStreams(String name, {String? language, int first = 60}) async {
+  Future<(TwitchGame?, TwitchPage<TwitchStream>)> gameStreams(
+    String name, {
+    String? language,
+    int first = 60,
+    TwitchSort sort = TwitchSort.viewers,
+  }) async {
     final data = await _gql(
-      'query(\$name: String!, \$first: Int, \$langs: [String!]) { game(name: \$name) { id name displayName viewersCount boxArtURL(width: 285, height: 380) '
-      'streams(first: \$first, options: {languages: \$langs}) { edges { cursor node { $_streamFields } } } } }',
-      {'name': name, 'first': first.clamp(1, 100), 'langs': _langs(language)},
+      'query(\$name: String!, \$first: Int, \$langs: [String!], \$sort: StreamSort) { game(name: \$name) { id name displayName viewersCount followersCount '
+      'boxArtURL(width: 285, height: 380) tags(tagType: CONTENT) { localizedName } '
+      'streams(first: \$first, options: {languages: \$langs, sort: \$sort}) { edges { cursor node { $_streamFields } } } } }',
+      {'name': name, 'first': first.clamp(1, 100), 'langs': _langs(language), 'sort': sort.gql},
     );
     final game = data['game'] as Map?;
     if (game == null) return (null, const TwitchPage<TwitchStream>([], null));
@@ -254,31 +312,205 @@ class TwitchApi {
     );
   }
 
-  /// Channels and categories matching [query].
-  Future<(List<TwitchChannel>, List<TwitchGame>)> search(String query) async {
+  static const _videoFields =
+      'id title lengthSeconds viewCount previewThumbnailURL(width: 640, height: 360) publishedAt game { displayName } owner { login displayName }';
+
+  /// Most viewed past broadcasts of a category.
+  Future<List<TwitchVideo>> gameVideos(String name, {int first = 30}) async {
+    final data = await _gql(
+      'query(\$name: String!, \$first: Int) { game(name: \$name) { videos(first: \$first, sort: VIEWS) { edges { node { $_videoFields } } } } }',
+      {'name': name, 'first': first.clamp(1, 100)},
+    );
+    return [
+      for (final e in (data['game']?['videos']?['edges'] as List? ?? const []))
+        if ((e as Map)['node'] is Map) TwitchVideo.fromNode(e['node'] as Map),
+    ];
+  }
+
+  /// One search across channels, categories, live channels and videos.
+  Future<TwitchSearchResults> searchAll(String query) async {
     final q = query.trim();
-    if (q.isEmpty) return (const <TwitchChannel>[], const <TwitchGame>[]);
+    if (q.isEmpty) return const TwitchSearchResults();
     final data = await _gql(
       'query(\$q: String!) { '
-      'searchUsers(userQuery: \$q, first: 20) { edges { node { id login displayName profileImageURL(width: 150) followers { totalCount } '
-      'stream { $_streamFields } } } } '
-      'searchCategories(query: \$q, first: 12) { edges { node { id name displayName viewersCount boxArtURL(width: 285, height: 380) } } } }',
+      'searchFor(userQuery: \$q, platform: "web") { '
+      'channels { edges { item { ... on User { id login displayName profileImageURL(width: 150) followers { totalCount } stream { $_streamFields } } } } } '
+      'games { edges { item { ... on Game { id name displayName viewersCount boxArtURL(width: 285, height: 380) } } } } '
+      'videos { edges { item { ... on Video { $_videoFields } } } } } '
+      'searchStreams(userQuery: \$q, first: 20) { edges { node { $_streamFields } } } }',
       {'q': q.length > 100 ? q.substring(0, 100) : q},
     );
-    final users = [
-      for (final e in (data['searchUsers']?['edges'] as List? ?? const []))
-        if ((e as Map)['node'] is Map) _channelFrom(e['node'] as Map),
+    List<Map> items(String key) => [
+      for (final e in (data['searchFor']?[key]?['edges'] as List? ?? const []))
+        if (e is Map && e['item'] is Map && (e['item'] as Map).isNotEmpty) e['item'] as Map,
     ];
-    // Live channels first, then by followers.
-    users.sort((a, b) {
-      if (a.isLive != b.isLive) return a.isLive ? -1 : 1;
-      return b.followers.compareTo(a.followers);
+    final channels = [for (final u in items('channels')) if ((u['login'] as String? ?? '').isNotEmpty) _channelFrom(u)];
+    // Twitch ranks by relevance; within that, live channels come first.
+    final live = channels.where((c) => c.isLive).toList();
+    final offline = channels.where((c) => !c.isLive).toList();
+    final seen = <String>{};
+    return TwitchSearchResults(
+      channels: [...live, ...offline],
+      games: [for (final g in items('games')) if ((g['name'] as String? ?? '').isNotEmpty) TwitchGame.fromNode(g)],
+      videos: [for (final v in items('videos')) if ((v['id'] as String? ?? '').isNotEmpty) TwitchVideo.fromNode(v)],
+      streams: [
+        for (final s in _streamPage(data['searchStreams']).items)
+          if (seen.add(s.login)) s,
+      ],
+    );
+  }
+
+  /// Autocomplete for the search box.
+  Future<List<TwitchSuggestion>> suggestions(String fragment) async {
+    final q = fragment.trim();
+    if (q.length < 2) return const [];
+    final data = await _gql(
+      'query(\$q: String!) { searchSuggestions(queryFragment: \$q, requestID: "ultratube") { edges { node { text content { __typename '
+      '... on SearchSuggestionChannel { login isLive profileImageURL(width: 50) } '
+      '... on SearchSuggestionCategory { boxArtURL(width: 52, height: 72) game { name } } } } } } }',
+      {'q': q.length > 60 ? q.substring(0, 60) : q},
+    );
+    return [
+      for (final e in (data['searchSuggestions']?['edges'] as List? ?? const []))
+        if (e is Map && e['node'] is Map && ((e['node'] as Map)['text'] as String? ?? '').isNotEmpty)
+          switch ((e['node'] as Map)['content']) {
+            {'__typename': 'SearchSuggestionChannel', 'login': final String login} && final Map c => TwitchSuggestion(
+              text: (e['node'] as Map)['text'] as String,
+              login: login,
+              image: c['profileImageURL'] as String? ?? '',
+              live: c['isLive'] == true,
+            ),
+            {'__typename': 'SearchSuggestionCategory'} && final Map c => TwitchSuggestion(
+              text: (e['node'] as Map)['text'] as String,
+              game: (c['game'] as Map?)?['name'] as String? ?? (e['node'] as Map)['text'] as String,
+              image: c['boxArtURL'] as String? ?? '',
+            ),
+            _ => TwitchSuggestion(text: (e['node'] as Map)['text'] as String),
+          },
+    ];
+  }
+
+  // ------------------------------------------------------------- account
+
+  /// Twitch's own TV app client: the only public one with the device-code
+  /// sign-in (type a code at twitch.tv/activate), so the password is never
+  /// typed into this app.
+  static const tvClientId = 'ue6666qo983tsx6so1t0vnawi233wa';
+
+  Future<Map<String, dynamic>> _oauth(String path, Map<String, String> form) async {
+    final res = await _http
+        .post(Uri.parse('https://id.twitch.tv/oauth2/$path'), headers: {'User-Agent': _ua}, body: form)
+        .timeout(const Duration(seconds: 20));
+    final body = res.body.isEmpty ? const <String, dynamic>{} : jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    return {...body, 'http': res.statusCode};
+  }
+
+  /// Starts a sign-in: `{device_code, user_code, verification_uri, interval, expires_in}`.
+  Future<Map<String, dynamic>> deviceCode() async {
+    final j = await _oauth('device', {'client_id': tvClientId, 'scopes': 'user:read:follows chat:read chat:edit'});
+    if (j['http'] != 200 || j['device_code'] is! String) throw TwitchException('Twitch respondeu ${j['http']}');
+    return j;
+  }
+
+  /// One poll of a pending sign-in. Tokens once the user approved; null
+  /// while still waiting; throws when the code expired or was refused.
+  Future<Map<String, dynamic>?> deviceToken(String deviceCode) async {
+    final j = await _oauth('token', {
+      'client_id': tvClientId,
+      'device_code': deviceCode,
+      'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
     });
-    final games = [
-      for (final e in (data['searchCategories']?['edges'] as List? ?? const []))
-        if ((e as Map)['node'] is Map) TwitchGame.fromNode(e['node'] as Map),
-    ];
-    return (users, games);
+    if (j['http'] == 200 && j['access_token'] is String) return j;
+    final message = '${j['message'] ?? ''}'.toLowerCase();
+    if (message.contains('pending') || message.contains('slow')) return null;
+    throw TwitchException(message.contains('expired') || message.contains('invalid device') ? 'O código expirou. Gere outro.' : 'A Twitch recusou o acesso.');
+  }
+
+  /// New tokens from a refresh token; null when it is no longer valid.
+  Future<Map<String, dynamic>?> refreshToken(String refresh) async {
+    final j = await _oauth('token', {'client_id': tvClientId, 'refresh_token': refresh, 'grant_type': 'refresh_token'});
+    return j['http'] == 200 && j['access_token'] is String ? j : null;
+  }
+
+  /// `{login, user_id}` of a valid token; null when expired or revoked.
+  Future<Map<String, dynamic>?> validate(String token) async {
+    final res = await _http
+        .get(Uri.parse('https://id.twitch.tv/oauth2/validate'), headers: {'Authorization': 'OAuth $token', 'User-Agent': _ua})
+        .timeout(const Duration(seconds: 20));
+    if (res.statusCode == 401) return null;
+    if (res.statusCode != 200) throw TwitchException('Twitch respondeu ${res.statusCode}');
+    return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  Future<void> revoke(String token) async {
+    await _oauth('revoke', {'client_id': tvClientId, 'token': token});
+  }
+
+  /// Every channel the account follows: `(login, display name, avatar)`.
+  Future<List<(String, String, String)>> followed(String token, String userId) async {
+    try {
+      return await _followedGql(token);
+    } on Exception {
+      // The private API changed or refused the token: the public one lists
+      // the same channels (no avatars; they are filled on the next refresh).
+      return _followedHelix(token, userId);
+    }
+  }
+
+  Future<List<(String, String, String)>> _followedGql(String token) async {
+    final out = <(String, String, String)>[];
+    String? cursor;
+    for (var page = 0; page < 20; page++) {
+      final data = await _gql(
+        'query(\$after: Cursor) { currentUser { follows(first: 100, after: \$after) { '
+        'edges { cursor node { login displayName profileImageURL(width: 150) } } pageInfo { hasNextPage } } } }',
+        {'after': cursor},
+        (tvClientId, token),
+      );
+      final follows = data['currentUser']?['follows'] as Map?;
+      if (follows == null) throw const TwitchException('Sessão da Twitch inválida');
+      final edges = follows['edges'] as List? ?? const [];
+      for (final e in edges) {
+        final n = (e as Map)['node'] as Map?;
+        final login = n?['login'] as String? ?? '';
+        if (login.isNotEmpty) out.add((login, n?['displayName'] as String? ?? login, n?['profileImageURL'] as String? ?? ''));
+        cursor = e['cursor'] as String? ?? cursor;
+      }
+      if (edges.isEmpty || follows['pageInfo']?['hasNextPage'] != true) break;
+    }
+    return out;
+  }
+
+  Future<List<(String, String, String)>> _followedHelix(String token, String userId) async {
+    final out = <(String, String, String)>[];
+    String? cursor;
+    for (var page = 0; page < 20; page++) {
+      final res = await _http
+          .get(
+            Uri.https('api.twitch.tv', '/helix/channels/followed', {'user_id': userId, 'first': '100', 'after': ?cursor}),
+            headers: {'Client-Id': tvClientId, 'Authorization': 'Bearer $token', 'User-Agent': _ua},
+          )
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode != 200) throw TwitchException('Twitch respondeu ${res.statusCode}');
+      final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      for (final c in (j['data'] as List? ?? const [])) {
+        final login = (c as Map)['broadcaster_login'] as String? ?? '';
+        if (login.isNotEmpty) out.add((login, c['broadcaster_name'] as String? ?? login, ''));
+      }
+      cursor = j['pagination']?['cursor'] as String?;
+      if (cursor == null || cursor.isEmpty) break;
+    }
+    return out;
+  }
+
+  /// Name and photo of the signed-in user.
+  Future<(String, String)> profile(String login) async {
+    final data = await _gql(
+      'query(\$login: String!) { user(login: \$login) { displayName profileImageURL(width: 150) } }',
+      {'login': login.toLowerCase()},
+    );
+    final u = data['user'] as Map?;
+    return (u?['displayName'] as String? ?? login, u?['profileImageURL'] as String? ?? '');
   }
 
   TwitchChannel _channelFrom(Map u, {List<TwitchVideo> videos = const []}) {

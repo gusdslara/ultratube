@@ -45,23 +45,23 @@ Future<void> saveToNewPlaylist(BuildContext context, WidgetRef ref, List<YtItem>
 /// "Salvar em playlist" sheet, like YouTube's.
 Future<void> showAddToPlaylist(BuildContext context, YtItem item) => showModalBottomSheet<void>(
   context: context,
-  builder: (_) => _PickerSheet(item: item),
+  builder: (_) => SafeArea(child: PlaylistPicker(item: item)),
 );
 
-class _PickerSheet extends ConsumerWidget {
-  const _PickerSheet({required this.item});
+/// Liked + local playlists with a checkbox each, and "Nova playlist".
+/// [shrinkWrap] false makes it a scrolling list (embedded in the video menu).
+class PlaylistPicker extends ConsumerWidget {
+  const PlaylistPicker({super.key, required this.item, this.shrinkWrap = true, this.closeOnCreate = true});
   final YtItem item;
+  final bool shrinkWrap;
+  final bool closeOnCreate;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlists = ref.watch(playlistsProvider);
     final liked = ref.watch(likedProvider).any((i) => i.url == item.url);
     final notifier = ref.read(playlistsProvider.notifier);
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    final children = <Widget>[
           const Padding(
             padding: EdgeInsets.fromLTRB(UT.s5, 0, UT.s5, UT.s2),
             child: Text('Salvar em…', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
@@ -94,12 +94,14 @@ class _PickerSheet extends ConsumerWidget {
               final name = await _askName(context);
               if (name == null) return;
               notifier.create(name, items: [item]);
-              if (context.mounted) Navigator.pop(context);
+              if (closeOnCreate && context.mounted) Navigator.pop(context);
             },
           ),
           const SizedBox(height: UT.s2),
-        ],
-      ),
+    ];
+    if (!shrinkWrap) return ListView(padding: const EdgeInsets.only(bottom: UT.s6), children: children);
+    return SingleChildScrollView(
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: children),
     );
   }
 }

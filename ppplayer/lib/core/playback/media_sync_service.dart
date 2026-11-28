@@ -5,6 +5,7 @@ import '../cache/image_cache_manager.dart';
 import 'playback_providers.dart';
 import 'package:pp_playback_engine/pp_playback_engine.dart' as engine;
 import 'media_handler.dart';
+import '../player/player_provider.dart';
 
 /// A service that synchronizes the [PlaybackStatus] with the system media controls.
 class MediaSyncService {
@@ -29,10 +30,96 @@ class MediaSyncService {
           break;
       }
     }, fireImmediately: true);
+    // The queue as the system sees it (watch "faixas em fila", car screens).
+    _queueSubscription = ref.listen(
+      playerProvider.select((s) => (s.playbackQueue.tracks, s.playbackQueue.currentIndex)),
+      (previous, next) {
+        if (_isDisposed) return;
+        Timer.run(() {
+          if (_isDisposed) return;
+          ref.read(audioHandlerProvider).publishQueue(next.$1, next.$2);
+        });
+      },
+      fireImmediately: true,
+    );
   }
+
+  ProviderSubscription? _queueSubscription;
 
   engine.PlaybackStatus? _lastStatus;
   DateTime _lastUpdateTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// What we last told the OS about "playing". Kept true through
+  /// buffering/reloads (see [_osPlaying]).
+  bool? _publishedPlaying;
+
+  /// Whether playback was wanted the last time the engine settled
+  /// (playing → true; paused/ended → false).
+  bool _wantsPlay = false;
+
+  /// When the current transitional stretch (buffering, reload, error
+  /// recovery) began while playback was wanted.
+  DateTime? _transitionSince;
+  Timer? _graceTimer;
+
+  /// How long a stall/reload may last before the OS hears "not playing".
+  static const _transitionGrace = Duration(seconds: 45);
+
+  /// Android only keeps the media foreground service while audio_service
+  /// is told `playing=true` (androidStopForegroundOnPause). If a live
+  /// stream buffers — or the engine reloads after a network hiccup — while
+  /// the app is in the background or PiP, publishing `playing=false` drops
+  /// the service, and Android 12+ forbids starting it again from the
+  /// background (ForegroundServiceStartNotAllowedException). Without it the
+  /// process loses network access and the stream dies with "Falha ao
+  /// reproduzir". So transitional states keep reporting "playing" (with a
+  /// buffering/loading processing state) while playback is still wanted.
+  bool _osPlaying(engine.PlaybackStatus status) {
+    final state = status.state;
+    switch (state) {
+      case engine.PlaybackState.playing:
+        _wantsPlay = true;
+        _transitionSince = null;
+        return true;
+      case engine.PlaybackState.paused:
+        _wantsPlay = false;
+        _transitionSince = null;
+        return false;
+      case engine.PlaybackState.ended:
+        // Between two queue items (playlist, queue, "up next") playback is
+        // still wanted: saying "stopped" here dropped the foreground
+        // service on every track change with the screen locked, and the
+        // next item was then loaded without network access.
+        if (_wantsPlay &&
+            ref.read(playerProvider.notifier).continuesAfterEnded(status)) {
+          return _inTransition();
+        }
+        _wantsPlay = false;
+        _transitionSince = null;
+        return false;
+      case engine.PlaybackState.ready:
+        // Loaded but not started: keep whatever we were doing.
+        return _wantsPlay;
+      case engine.PlaybackState.idle:
+      case engine.PlaybackState.preparing:
+      case engine.PlaybackState.buffering:
+      case engine.PlaybackState.error:
+        if (!_wantsPlay) return false;
+        return _inTransition();
+    }
+  }
+
+  /// "Still playing" for the OS while a wanted playback is between states,
+  /// for at most [_transitionGrace].
+  bool _inTransition() {
+    final since = _transitionSince ??= DateTime.now();
+    if (DateTime.now().difference(since) >= _transitionGrace) {
+      _wantsPlay = false;
+      _transitionSince = null;
+      return false;
+    }
+    return true;
+  }
 
   void _handleStatusUpdate(engine.PlaybackStatus currentStatus) {
     final handler = ref.read(audioHandlerProvider);
@@ -41,6 +128,7 @@ class MediaSyncService {
     final trackChanged = track != null && track.id != _lastTrackId;
     final durationChanged =
         track != null && currentStatus.duration != _lastDuration;
+    final liveChanged = _lastStatus != null && _lastStatus!.isLive != currentStatus.isLive;
 
     if (trackChanged) {
       _lastArtCacheFile = null;
@@ -63,10 +151,11 @@ class MediaSyncService {
     // 2. Throttle playback state updates to avoid unnecessary COM message loop pumping
     final now = DateTime.now();
     final stateChanged = _lastStatus?.state != currentStatus.state;
-    final playingChanged = _lastStatus?.isPlaying != currentStatus.isPlaying;
+    final osPlaying = _osPlaying(currentStatus);
+    final playingChanged = _publishedPlaying != osPlaying;
 
     // Calculate expected position to detect seeks
-    final expectedPosition = _lastStatus != null && _lastStatus!.isPlaying
+    final expectedPosition = _lastStatus != null && _publishedPlaying == true
         ? _lastStatus!.position + now.difference(_lastUpdateTime)
         : _lastStatus?.position ?? Duration.zero;
 
@@ -74,23 +163,64 @@ class MediaSyncService {
     final positionJumped =
         (currentStatus.position - expectedPosition).inMilliseconds.abs() > 2000;
 
-    if (stateChanged || playingChanged || positionJumped) {
+    _scheduleGraceCheck();
+
+    if (stateChanged || playingChanged || positionJumped || liveChanged) {
       _lastUpdateTime = now;
       _lastStatus = currentStatus;
+      _publishedPlaying = osPlaying;
 
       // Run asynchronously to avoid Win32 COM message loop pumping during Flutter's internal phases
       Timer.run(() {
         if (_isDisposed) return;
         handler.updatePlaybackState(
-          playing: currentStatus.isPlaying,
+          playing: osPlaying,
           position: currentStatus.position,
           bufferedPosition: currentStatus.buffered,
           isIFrameMode: currentStatus.isIFrameMode,
           speed: currentStatus.speed,
           processingState: _mapToAudioProcessingState(currentStatus.state),
+          live: currentStatus.isLive,
         );
       });
     }
+  }
+
+  /// A play request from outside the app (watch, headset, notification),
+  /// possibly with the phone locked and the process just woken up. Android
+  /// only keeps the media foreground service — and with it network access
+  /// in the background — while the session says "playing". Saying so right
+  /// away (as "loading") lets the stream be resolved and fetched; before,
+  /// the app stayed without network ("Unable to resolve host") and the
+  /// request never started. The grace period still ends it if nothing plays.
+  void playRequested() {
+    if (_isDisposed) return;
+    _wantsPlay = true;
+    _transitionSince ??= DateTime.now();
+    _publishedPlaying = true;
+    final last = _lastStatus;
+    ref.read(audioHandlerProvider).updatePlaybackState(
+      playing: true,
+      position: last?.position ?? Duration.zero,
+      bufferedPosition: last?.buffered ?? Duration.zero,
+      processingState: AudioProcessingState.loading,
+      live: last?.isLive ?? false,
+    );
+    _scheduleGraceCheck();
+  }
+
+  /// A stall that never recovers must still end as "not playing" (so the
+  /// notification can be dismissed), even if the engine emits nothing more.
+  void _scheduleGraceCheck() {
+    _graceTimer?.cancel();
+    final since = _transitionSince;
+    if (since == null) return;
+    final left = _transitionGrace - DateTime.now().difference(since);
+    _graceTimer = Timer(left.isNegative ? Duration.zero : left, () {
+      if (_isDisposed) return;
+      final last = _lastStatus;
+      if (last != null) _handleStatusUpdate(last.copyWith());
+    });
   }
 
   AudioProcessingState _mapToAudioProcessingState(engine.PlaybackState state) {
@@ -122,7 +252,9 @@ class MediaSyncService {
         artist: track.artist ?? '',
         artUri: track.artworkUrl,
         artCacheFile: _lastArtCacheFile,
-        duration: duration,
+        // No length (live, or not known yet): no bar on the lock screen or
+        // the watch instead of one stuck at 0:00.
+        duration: duration > Duration.zero ? duration : null,
       );
     });
   }
@@ -175,7 +307,9 @@ class MediaSyncService {
 
   void dispose() {
     _isDisposed = true;
+    _graceTimer?.cancel();
     _subscription?.close();
+    _queueSubscription?.close();
   }
 }
 

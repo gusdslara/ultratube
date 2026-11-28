@@ -25,6 +25,14 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
 }
 
+// The shared native module (android/media) and the watch build take their
+// library versions from one catalog; the phone build uses the same file.
+dependencyResolutionManagement {
+    versionCatalogs {
+        create("libs") { from(files("../../android/gradle/libs.versions.toml")) }
+    }
+}
+
 rootProject.name = "Ultratube"
 include(":app")
 include(":ultratube-media")

@@ -17,7 +17,9 @@ import '../../features/ultratube/subscriptions_screen.dart';
 import '../../features/ultratube/watch_screen.dart';
 import '../../features/ultratube/yt_search_screen.dart';
 import '../../features/twitch/twitch_channel_screen.dart';
+import '../../features/twitch/twitch_category_screen.dart';
 import '../../features/twitch/twitch_home_screen.dart';
+import '../../features/twitch/twitch_search_screen.dart';
 import '../../features/twitch/twitch_watch_screen.dart';
 import '../api/yt_models.dart';
 import '../../features/library/library_screen.dart';
@@ -41,8 +43,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/home',
     routes: [
       ShellRoute(
-        builder: (context, state, child) =>
-            ScaffoldWithNav(location: state.uri.path, child: child),
+        builder: (context, state, child) => _TabBack(
+          location: state.uri.path,
+          child: ScaffoldWithNav(location: state.uri.path, child: child),
+        ),
         routes: [
           GoRoute(
             path: '/shorts',
@@ -280,3 +284,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+/// System back on a tab. Tabs replace each other (`go`), so there is no page
+/// to pop: from any tab other than Início, back returns to Início, and only
+/// there does it leave the app, like the YouTube app. Pushed pages, sheets
+/// and dialogs are popped by the router as usual.
+class _TabBack extends StatelessWidget {
+  const _TabBack({required this.location, required this.child});
+  final String location;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => BackButtonListener(
+    onBackButtonPressed: () async {
+      final router = GoRouter.of(context);
+      if (router.canPop() || location == '/home') return false;
+      router.go('/home');
+      return true;
+    },
+    child: child,
+  );
+}

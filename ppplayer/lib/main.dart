@@ -1,4 +1,5 @@
 import 'package:ppplayer/l10n/app_localization_delegates.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,7 @@ import 'package:macos_file_open_handler/macos_file_open_handler.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'core/player/player_provider.dart';
+import 'core/twitch/twitch_proxy.dart';
 import 'core/local_library/local_library_service.dart';
 import 'core/ultratube/ultratube_store.dart';
 import 'core/ultratube/ultratube_platform.dart';
@@ -119,6 +121,9 @@ void main() async {
   // that would conflict with any future native-side control registration.
   // We bypass it on iOS for the same reason we do on macOS, routing all
   // control events through the com.ppplayer.app/ios_media_controls channel.
+  // Twitch live URLs point at the local ad-filter proxy; have it listening
+  // before the player restores a saved session.
+  if (!kIsWeb && Platform.isAndroid) unawaited(TwitchProxy.instance.start());
   startupLog('AudioHandler init start');
   if (!kIsWeb && (Platform.isMacOS || Platform.isIOS)) {
     // macOS/iOS: instantiate without registering an audio_service background isolate.
@@ -133,6 +138,13 @@ void main() async {
         androidStopForegroundOnPause: true,
         androidNotificationIcon: 'drawable/ic_ultratube_notification',
         androidResumeOnClick: true,
+        // YouTube covers are up to 1280x720. The metadata bitmap is copied
+        // to every controller — the lock screen and, over Bluetooth, a
+        // paired watch — so a smaller one shows up there much sooner.
+        artDownscaleWidth: 512,
+        artDownscaleHeight: 512,
+        fastForwardInterval: Duration(seconds: 10),
+        rewindInterval: Duration(seconds: 10),
       ),
     );
   }

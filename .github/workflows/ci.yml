@@ -1,0 +1,67 @@
+name: CI
+
+# Android builds on every push and pull request: the phone app (Flutter) and
+# the Galaxy Watch app (Kotlin). Release builds here fall back to the debug
+# key; the signed APKs are attached to GitHub Releases.
+on:
+  push:
+    branches: [main, 'celular-*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.4'
+
+jobs:
+  watch:
+    name: Watch app (Wear OS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew && ./gradlew --no-daemon :wear:assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watch-apk-debug-signed
+          path: android/wear/build/outputs/apk/release/*.apk
+          retention-days: 7
+
+  phone:
+    name: Phone app (Flutter, Android)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ppplayer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Unit tests (player queue)
+        run: flutter test test/core/player/play_now_test.dart
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone-apk-debug-signed
+          path: ppplayer/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7

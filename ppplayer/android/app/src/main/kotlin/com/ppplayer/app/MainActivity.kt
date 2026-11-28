@@ -35,12 +35,29 @@ class MainActivity : AudioServiceActivity() {
         Log.d("PipDebug", "$time [NATIVE] event=$event pip=$pip focus=$focus size=$sizeStr isFinishing=$isFinishing")
     }
 
+    /**
+     * Android 16 (targetSdk 36) no longer calls onBackPressed: back only
+     * reaches the app through an OnBackInvokedCallback, which Flutter
+     * registers lazily, when the framework reports it has something to pop.
+     * That report can be missed (cached audio_service engine, routes inside
+     * the shell), and then the system closes the activity on every back.
+     * Keep the callback registered for the whole life of the activity: back
+     * always goes to Flutter, which pops a page, returns to Início or, with
+     * nothing left, closes the app itself.
+     */
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        setFrameworkHandlesBack(true)
+    }
+
+    override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
+        if (Build.VERSION.SDK_INT >= 33) super.setFrameworkHandlesBack(true)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        flutterEngine.plugins.add(UltratubeCatalogPlugin())
-        flutterEngine.plugins.add(WebViewPlugin())
-        flutterEngine.plugins.add(LocalFilesPlugin())
-        flutterEngine.plugins.add(NetworkOutputsPlugin())
+        // Usually already attached by UltratubeApplication (same engine).
+        UltratubePlugins.register(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {

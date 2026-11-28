@@ -14,11 +14,16 @@ final twitchGamesProvider = FutureProvider<List<TwitchGame>>((ref) async {
   return page.items;
 });
 
-/// One category: header + its lives in the chosen language.
-final twitchCategoryProvider = FutureProvider.family<(TwitchGame?, List<TwitchStream>), (String, String)>((ref, args) async {
-  final (game, page) = await TwitchApi.instance.gameStreams(args.$1, language: args.$2, first: 80);
+/// One category: header + its lives in the chosen language and order.
+final twitchCategoryProvider = FutureProvider.family<(TwitchGame?, List<TwitchStream>), (String, String, TwitchSort)>((ref, args) async {
+  final (game, page) = await TwitchApi.instance.gameStreams(args.$1, language: args.$2, first: 80, sort: args.$3);
   return (game, page.items);
 });
+
+/// Most viewed past broadcasts of one category.
+final twitchCategoryVideosProvider = FutureProvider.family<List<TwitchVideo>, String>(
+  (ref, name) => TwitchApi.instance.gameVideos(name),
+);
 
 final twitchChannelProvider = FutureProvider.family<TwitchChannel, String>((ref, login) => TwitchApi.instance.channel(login));
 
@@ -40,6 +45,12 @@ final twitchFollowedProvider = FutureProvider<List<TwitchChannel>>((ref) async {
   return list;
 });
 
-final twitchSearchProvider = FutureProvider.family<(List<TwitchChannel>, List<TwitchGame>), String>(
-  (ref, query) => TwitchApi.instance.search(query),
+/// Channels, categories, live channels and videos for a query.
+final twitchSearchProvider = FutureProvider.autoDispose.family<TwitchSearchResults, String>(
+  (ref, query) => TwitchApi.instance.searchAll(query),
+);
+
+/// Autocomplete while typing.
+final twitchSuggestionsProvider = FutureProvider.autoDispose.family<List<TwitchSuggestion>, String>(
+  (ref, fragment) => TwitchApi.instance.suggestions(fragment),
 );

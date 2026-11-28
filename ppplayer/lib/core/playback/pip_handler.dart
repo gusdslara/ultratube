@@ -92,6 +92,7 @@ class PipHandler {
           for (final l in _pipModeListeners) {
             l(inPip);
           }
+          _syncBackgroundVideo();
         } else if (call.method == 'onPipEntryRequested') {
           // Native side (onUserLeaveHint) notified us that PiP is about to be
           // entered by Android. Arm the pending guard and watchdog NOW — before
@@ -130,6 +131,7 @@ class PipHandler {
           for (final l in _activityStoppedListeners) {
             l();
           }
+          _syncBackgroundVideo();
         } else if (call.method == 'onActivityStarted') {
           final oldState = _isActivityStopped;
           _isActivityStopped = false;
@@ -142,11 +144,30 @@ class PipHandler {
           for (final l in _activityStartedListeners) {
             l();
           }
+          _syncBackgroundVideo();
         } else if (call.method == 'onPipEntryFailed') {
           notifyPipEntryFailed();
         }
       });
     }
+  }
+
+  static Timer? _backgroundVideoTimer;
+
+  /// Fully in the background (stopped, no floating window, none on its
+  /// way): the picture of a video is dropped until the app is back, so
+  /// the audio keeps playing without decoding or downloading frames.
+  /// Debounced: Android reports stop/PiP changes in either order.
+  static void _syncBackgroundVideo() {
+    _backgroundVideoTimer?.cancel();
+    if (!_isActivityStopped) {
+      unawaited(MediaKitPlayerAdapter.suspendVideo(false));
+      return;
+    }
+    _backgroundVideoTimer = Timer(const Duration(milliseconds: 800), () {
+      final hidden = _isActivityStopped && !_isInPipMode && !_pipRequestPending;
+      unawaited(MediaKitPlayerAdapter.suspendVideo(hidden));
+    });
   }
 
   // ---------------------------------------------------------------------------
