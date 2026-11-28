@@ -141,6 +141,27 @@ class PlayerNotifier extends Notifier<PlayerState> {
   // duplicate ended emissions don't skip twice, while a genuinely new (even very
   // short) track that ends right after still advances.
   String? _lastAdvancedEndedKey;
+  bool _lastEndedContinues = false;
+
+  /// Something plays after the current item ends: another queue item,
+  /// repeat/shuffle, or YouTube's "up next" when autoplay is on.
+  bool _continuesAfterCurrent() {
+    final q = state.playbackQueue;
+    final current = q.currentTrack;
+    if (current == null) return false;
+    if (q.repeatMode != RepeatMode.none) return true;
+    if (q.isShuffled && q.tracks.length > 1) return true;
+    if (q.currentIndex + 1 < q.tracks.length) return true;
+    return current.spotifyId.startsWith('youtube:') &&
+        ref.read(ultratubeAutoplayProvider);
+  }
+
+  /// Whether the `ended` [status] is followed by another item. Safe to ask
+  /// before or after this notifier advanced the queue for that same event.
+  bool continuesAfterEnded(PlaybackStatus status) =>
+      _lastAdvancedEndedKey == '${status.generation}:${status.track?.id}'
+      ? _lastEndedContinues
+      : _continuesAfterCurrent();
   bool _lastPipEnabled = false;
   double? _lastPipAspect;
   Timer? _saveTimer;
@@ -189,6 +210,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         if (status.state == PlaybackState.ended) {
           final endedKey = '${status.generation}:${status.track?.id}';
           if (_lastAdvancedEndedKey != endedKey) {
+            _lastEndedContinues = _continuesAfterCurrent();
             _lastAdvancedEndedKey = endedKey;
             skipNext();
           }
@@ -1203,6 +1225,52 @@ class PlayerNotifier extends Notifier<PlayerState> {
         queueIndex: index,
       );
     }
+  }
+
+  /// Plays [track] now without throwing the queue away: it goes right after
+  /// the current item and playback jumps to it. What the viewer queued
+  /// ("Tocar em seguida", "Adicionar à fila") stays next; with
+  /// [keepContext] so does the rest of the playlist being played.
+  /// Automatic suggestions for the previous video are dropped (the new one
+  /// brings its own).
+  Future<void> playNow(Track track, {bool keepContext = false}) {
+    final q = state.playbackQueue;
+    if (q.currentTrack == null) return playTrack(track, queue: [track]);
+    const maxHistory = 50;
+    final played = q.tracks.sublist(0, q.currentIndex + 1);
+    final history = [
+      for (final t in played.skip((played.length - maxHistory).clamp(0, played.length)))
+        if (t.spotifyId != track.spotifyId) t,
+    ];
+    final upcoming = [
+      for (final t in q.tracks.skip(q.currentIndex + 1))
+        if (t.spotifyId != track.spotifyId &&
+            (t.queueOrigin == QueueItemOrigin.user ||
+                (keepContext && t.queueOrigin == QueueItemOrigin.context)))
+          t,
+    ];
+    final next = track.copyWith(queueItemId: null);
+    return playTrack(
+      next,
+      queue: [...history, next, ...upcoming],
+      queueIndex: history.length,
+    );
+  }
+
+  /// Appends automatic suggestions ("up next" of the current video). They
+  /// stay behind everything the viewer queued, and only when autoplay is on.
+  void addAutoplayTracks(List<Track> tracks) {
+    if (!ref.read(ultratubeAutoplayProvider)) return;
+    var q = state.playbackQueue;
+    final known = {for (final t in q.tracks) t.spotifyId};
+    for (final track in tracks) {
+      if (!known.add(track.spotifyId)) continue;
+      q = q.add(track.copyWith(queueOrigin: QueueItemOrigin.autoplay));
+    }
+    if (identical(q, state.playbackQueue)) return;
+    _autoplaySeenTrackIds.addAll(tracks.map((t) => t.spotifyId));
+    state = state.copyWith(playbackQueue: q);
+    _scheduleSaveState();
   }
 
   void addToQueue(Track track) {

@@ -76,16 +76,55 @@ abstract class INativePlayerAdapter {
   Future<void> dispose();
 }
 
+/// The shared [Player], with media_kit_video's surface refresh made gapless.
+///
+/// Every time Android hands the video a new surface (unlocking the phone,
+/// returning to the app, a video of another size), media_kit_video rebuilds
+/// the video output and then calls `player.seek(currentPosition)` so a frame
+/// is drawn. During playback that seek flushes the audio too: sound cuts for
+/// a moment and resumes — on a network stream after re-buffering. While
+/// playing, re-selecting the video track is enough: the decoder restarts on
+/// the new surface and the audio is never touched. Paused, the seek is kept
+/// (it is what draws the still frame, and there is nothing to interrupt).
+class _SurfacePlayer extends Player {
+  _SurfacePlayer({super.configuration});
+
+  /// Seek asked for by the engine (the viewer, a resume position, …).
+  Future<void> seekTo(Duration position) => super.seek(position);
+
+  /// Reached only by media_kit_video's surface listener.
+  @override
+  Future<void> seek(Duration duration) async {
+    if (!state.playing || state.completed) return super.seek(duration);
+    try {
+      final mpv = platform as dynamic;
+      if (!MediaKitPlayerAdapter._pictureWanted) {
+        // The listener switches the picture back on with the surface.
+        if (MediaKitPlayerAdapter._videoSuspended) {
+          await mpv.setProperty('vid', 'no');
+        }
+        return;
+      }
+      final wid = await mpv.getProperty('wid') as String;
+      if (wid.isEmpty || wid == '0') return; // surface gone: nothing to draw on
+      await mpv.setProperty('vid', 'no');
+      await mpv.setProperty('vid', 'auto');
+    } catch (e) {
+      debugPrint('MediaKitPlaybackEngine: surface refresh failed: $e');
+    }
+  }
+}
+
 /// Production adapter wrapping a real [media_kit] [Player].
 class MediaKitPlayerAdapter implements INativePlayerAdapter {
-  static Player? _sharedPlayer;
+  static _SurfacePlayer? _sharedPlayer;
   static VideoController? _sharedVideoController;
 
   MediaKitPlayerAdapter() {
     // mpv's debug log is hundreds of lines per second while a video plays;
     // formatting and printing each one keeps a CPU core busy for nothing.
     // Release builds only hear about warnings and errors.
-    _sharedPlayer ??= Player(
+    _sharedPlayer ??= _SurfacePlayer(
       configuration: const PlayerConfiguration(
         logLevel: kDebugMode ? MPVLogLevel.debug : MPVLogLevel.warn,
       ),
@@ -162,7 +201,7 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
     });
   }
 
-  late final Player _player;
+  late final _SurfacePlayer _player;
   late final VideoController _videoController;
   StreamSubscription<PlayerLog>? _logSubscription;
   bool _disposed = false;
@@ -212,6 +251,10 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
   /// while the app is in the background (see [suspendVideo]).
   static bool _networkVideo = false;
   static bool _videoSuspended = false;
+
+  /// The current item is opened with a picture (not audio-only).
+  static bool _hasPicture = true;
+  static bool get _pictureWanted => _hasPicture && !_videoSuspended;
 
   /// Nothing of the app on screen: stopped activity, or the engine was
   /// started by the media service with no activity at all. (A floating
@@ -299,6 +342,7 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
       // (and paying for) minutes that a skip throws away.
       final audioOnly = !local && !video;
       _networkVideo = !local && video;
+      _hasPicture = !audioOnly;
       // Opened with nothing on screen (locked phone, app in the
       // background without PiP — e.g. "next" from a watch): no surface to
       // draw on, and asking mpv for a picture there made the open hang
@@ -345,7 +389,7 @@ class MediaKitPlayerAdapter implements INativePlayerAdapter {
   @override
   Future<void> stop() => _player.stop();
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) => _player.seekTo(position);
   @override
   Future<void> setVolume(double volume100) => _player.setVolume(volume100);
   @override
@@ -443,6 +487,11 @@ class NativePlaybackSession {
   /// Pending check for a non-fatal mpv error line (see `_softError`).
   Timer? softErrorTimer;
 
+  /// What the native player last reported, and the pending check for a
+  /// pause nobody asked for (see `_unrequestedPause`).
+  bool nativePlaying = false;
+  Timer? unrequestedPauseTimer;
+
   VideoController? get videoController => adapter.videoController;
 
   /// Cancel subscriptions and dispose the adapter exactly once (idempotent).
@@ -450,6 +499,7 @@ class NativePlaybackSession {
     if (_torn) return;
     _torn = true;
     softErrorTimer?.cancel();
+    unrequestedPauseTimer?.cancel();
     for (final sub in subscriptions) {
       sub.cancel();
     }
@@ -622,8 +672,13 @@ class MediaKitPlaybackEngine implements PlaybackController {
       }),
       a.playingStream.listen((playing) {
         if (session != _activeSession || _disposed) return;
+        session.nativePlaying = playing;
         // Don't overwrite preparing — wait for buffering/playing stream events.
         if (_currentStatus.state == PlaybackState.preparing) return;
+        if (!playing && _intendedState == PlaybackState.playing) {
+          _unrequestedPause(session);
+          return;
+        }
         _updateStatus(
           _currentStatus.copyWith(
             state: playing ? PlaybackState.playing : PlaybackState.paused,
@@ -1212,6 +1267,30 @@ class MediaKitPlaybackEngine implements PlaybackController {
       }
       print('MediaKitPlaybackEngine: stalled after "$err"');
       _failAttempt(generation, 'error:connection_lost');
+    });
+  }
+
+  /// The native player paused while playback is wanted. mpv does that by
+  /// itself at the end of a file (`keep-open`), right before reporting the
+  /// end: publishing "paused" there told the system the music had stopped
+  /// between two queue items, and Android dropped the media foreground
+  /// service — with the screen locked, the next item then never started.
+  /// So it is not published. Should the pause be anything else (a late
+  /// command from the previous item, a surface change), playback is asked
+  /// for again instead of staying silently stopped.
+  void _unrequestedPause(NativePlaybackSession session) {
+    session.unrequestedPauseTimer?.cancel();
+    session.unrequestedPauseTimer = Timer(const Duration(milliseconds: 700), () {
+      if (_disposed || _activeSession != session) return;
+      if (_intendedState != PlaybackState.playing || session.nativePlaying) return;
+      final state = _currentStatus.state;
+      if (state == PlaybackState.ended ||
+          state == PlaybackState.error ||
+          state == PlaybackState.idle) {
+        return;
+      }
+      debugPrint('MediaKitPlaybackEngine: paused without a request; resuming');
+      unawaited(session.adapter.play());
     });
   }
 

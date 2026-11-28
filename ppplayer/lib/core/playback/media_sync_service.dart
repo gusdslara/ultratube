@@ -74,14 +74,26 @@ class MediaSyncService {
   /// process loses network access and the stream dies with "Falha ao
   /// reproduzir". So transitional states keep reporting "playing" (with a
   /// buffering/loading processing state) while playback is still wanted.
-  bool _osPlaying(engine.PlaybackState state) {
+  bool _osPlaying(engine.PlaybackStatus status) {
+    final state = status.state;
     switch (state) {
       case engine.PlaybackState.playing:
         _wantsPlay = true;
         _transitionSince = null;
         return true;
       case engine.PlaybackState.paused:
+        _wantsPlay = false;
+        _transitionSince = null;
+        return false;
       case engine.PlaybackState.ended:
+        // Between two queue items (playlist, queue, "up next") playback is
+        // still wanted: saying "stopped" here dropped the foreground
+        // service on every track change with the screen locked, and the
+        // next item was then loaded without network access.
+        if (_wantsPlay &&
+            ref.read(playerProvider.notifier).continuesAfterEnded(status)) {
+          return _inTransition();
+        }
         _wantsPlay = false;
         _transitionSince = null;
         return false;
@@ -93,14 +105,20 @@ class MediaSyncService {
       case engine.PlaybackState.buffering:
       case engine.PlaybackState.error:
         if (!_wantsPlay) return false;
-        final since = _transitionSince ??= DateTime.now();
-        if (DateTime.now().difference(since) >= _transitionGrace) {
-          _wantsPlay = false;
-          _transitionSince = null;
-          return false;
-        }
-        return true;
+        return _inTransition();
     }
+  }
+
+  /// "Still playing" for the OS while a wanted playback is between states,
+  /// for at most [_transitionGrace].
+  bool _inTransition() {
+    final since = _transitionSince ??= DateTime.now();
+    if (DateTime.now().difference(since) >= _transitionGrace) {
+      _wantsPlay = false;
+      _transitionSince = null;
+      return false;
+    }
+    return true;
   }
 
   void _handleStatusUpdate(engine.PlaybackStatus currentStatus) {
@@ -133,7 +151,7 @@ class MediaSyncService {
     // 2. Throttle playback state updates to avoid unnecessary COM message loop pumping
     final now = DateTime.now();
     final stateChanged = _lastStatus?.state != currentStatus.state;
-    final osPlaying = _osPlaying(currentStatus.state);
+    final osPlaying = _osPlaying(currentStatus);
     final playingChanged = _publishedPlaying != osPlaying;
 
     // Calculate expected position to detect seeks

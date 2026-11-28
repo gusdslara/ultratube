@@ -210,6 +210,49 @@ void main() {
       sourceType: PlaybackSourceType.local,
     );
 
+    test('a pause nobody asked for is not published; playback is resumed', () async {
+      await engine.play(localTrack);
+      final adapter = adapters.last;
+      adapter._playingCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.currentStatus.state, PlaybackState.playing);
+      final plays = adapter.plays;
+
+      adapter._playingCtrl.add(false);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.currentStatus.state, PlaybackState.playing);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(adapter.plays, plays + 1);
+    });
+
+    test('the pause at the end of a file goes straight to ended', () async {
+      await engine.play(localTrack);
+      final adapter = adapters.last;
+      adapter._playingCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      final plays = adapter.plays;
+
+      // mpv (keep-open) pauses, then reports the end.
+      adapter._playingCtrl.add(false);
+      adapter._completedCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(statuses.map((s) => s.state), isNot(contains(PlaybackState.paused)));
+      expect(engine.currentStatus.state, PlaybackState.ended);
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(adapter.plays, plays);
+    });
+
+    test('a requested pause is still published', () async {
+      await engine.play(localTrack);
+      final adapter = adapters.last;
+      adapter._playingCtrl.add(true);
+      await Future<void>.delayed(Duration.zero);
+      await engine.pause();
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      expect(engine.currentStatus.state, PlaybackState.paused);
+      expect(adapter.plays, 1);
+    });
+
     testWidgets('live: rejected seek and socket hiccups do not fail playback', (
       tester,
     ) async {
